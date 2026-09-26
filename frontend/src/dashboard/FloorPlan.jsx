@@ -61,7 +61,7 @@ function Stairs({ item }) {
         <path d="M8 20h4v-4h4v-4h4V8" fill="none" stroke="#fff" strokeWidth="2.4" />
         <circle cx="8" cy="8" r="2.2" fill="#fff" />
       </Pictogram>
-      <text x={cx} y={item.y + item.h - 0.35} textAnchor="middle" fontSize="0.48" fill="#1d4ed8" style={{ pointerEvents: "none" }}>
+      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.72" fontWeight="700" fill="#1d4ed8" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.22, paintOrder: "stroke" }}>
         Stair
       </text>
     </g>
@@ -87,7 +87,7 @@ function Elevator({ item, active }) {
         <circle cx="16" cy="7" r="2" fill="#fff" />
         <path d="M5 18c.4-3 2-4.5 3-4.5s2.6 1.5 3 4.5H5zM13 18c.4-3 2-4.5 3-4.5s2.6 1.5 3 4.5h-6z" fill="#fff" />
       </Pictogram>
-      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.42" fill="#111827" style={{ pointerEvents: "none" }}>
+      <text x={cx} y={item.y + item.h - 0.22} textAnchor="middle" fontSize="0.58" fontWeight="700" fill="#111827" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.18, paintOrder: "stroke" }}>
         Elev {item.label}
       </text>
     </g>
@@ -108,15 +108,17 @@ function shortUse(room) {
 }
 
 function RoomTag({ room, selected }) {
+  const ink = { pointerEvents: "none", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.12, paintOrder: "stroke" };
   if (room.kind === "restroom") {
     return (
       <text
         x={room.x + room.w / 2}
-        y={room.y + room.h - 0.28}
+        y={room.y + room.h - 0.22}
         textAnchor="middle"
-        fontSize="0.42"
+        fontSize="0.7"
+        fontWeight="700"
         fill="#92400e"
-        style={{ pointerEvents: "none" }}
+        style={ink}
       >
         WC
       </text>
@@ -124,27 +126,31 @@ function RoomTag({ room, selected }) {
   }
   const wide = room.w >= 6.5 || room.h >= 6;
   const title = room.census ? room.id : (room.label || room.type);
-  const sub = room.census || wide ? shortUse(room) : "";
-  const titleSize = wide ? 0.95 : Math.min(0.72, room.w / 6.2);
+  const sub = room.h >= 3.8 && (room.census || wide) ? shortUse(room) : "";
+  const titleSize = Math.min(wide ? 1.25 : 1.05, room.w * 0.23, room.h * 0.22);
+  const subSize = Math.min(wide ? 0.72 : 0.58, titleSize * 0.62);
   return (
     <g style={{ pointerEvents: "none" }}>
       <text
         x={room.x + room.w / 2}
-        y={room.y + room.h / 2 - (sub ? 0.18 : 0)}
+        y={room.y + room.h / 2 - (sub ? titleSize * 0.15 : titleSize * 0.32)}
         textAnchor="middle"
         fontSize={titleSize}
         fontWeight="700"
-        fill={selected ? "#14532d" : "#1e293b"}
+        fill={selected ? "#14532d" : "#0f172a"}
+        style={ink}
       >
         {title}
       </text>
       {sub && (
         <text
           x={room.x + room.w / 2}
-          y={room.y + room.h / 2 + (wide ? 0.95 : 0.62)}
+          y={room.y + room.h / 2 + subSize * 1.35}
           textAnchor="middle"
-          fontSize={wide ? 0.55 : 0.4}
-          fill={selected ? "#166534" : "#475569"}
+          fontSize={subSize}
+          fontWeight="700"
+          fill={selected ? "#14532d" : "#1e293b"}
+          style={ink}
         >
           {sub}
         </text>
