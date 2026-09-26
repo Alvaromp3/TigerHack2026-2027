@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import {
+  BUILDING,
   FRAME,
   STATUS,
   applySurge,
@@ -204,6 +205,10 @@ export default function CommandCenter() {
   const [showLabels, setShowLabels] = useState(true);
   const [zoom, setZoom] = useState(1.25);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [fitToken, setFitToken] = useState(0);
+  const mapRef = useRef(null);
+  const zoomRef = useRef(1.25);
+  const startZoom = useRef(null);
   const [tab, setTab] = useState("overview");
   const [toast, setToast] = useState("");
   const [now, setNow] = useState(() => new Date());
@@ -248,8 +253,8 @@ export default function CommandCenter() {
     setSelectedId(null);
     setElevatorOpen(false);
     setHover(null);
-    setPan({ x: 0, y: 0 });
     setNote(null);
+    setFitToken((token) => token + 1);
     if (nav !== "incidents") setNav("live");
   }
 
@@ -293,8 +298,44 @@ export default function CommandCenter() {
     );
   }
 
+  zoomRef.current = zoom;
+
+  useLayoutEffect(() => {
+    const stage = mapRef.current;
+    if (!stage) return;
+    const stageRect = stage.getBoundingClientRect();
+    const overview = stage.querySelector(".overview");
+    const detail = stage.querySelector(".detail");
+    const width = stageRect.width;
+    const height = stageRect.height;
+    if (width < 80 || height < 80) return;
+    const left = overview ? overview.getBoundingClientRect().right - stageRect.left + 14 : 18;
+    const right = detail ? stageRect.right - detail.getBoundingClientRect().left + 14 : 18;
+    const top = 14;
+    const bottom = 36;
+    const freeW = Math.max(160, width - left - right);
+    const freeH = Math.max(160, height - top - bottom);
+    const bw = BUILDING.w + 1.2;
+    const bh = BUILDING.h + 1.2;
+    if (startZoom.current == null) {
+      startZoom.current = Math.max(
+        0.5,
+        Math.min(1.8, Math.min((FRAME.w * freeW) / (bw * width), (FRAME.h * freeH) / (bh * height))),
+      );
+    }
+    const z = startZoom.current;
+    zoomRef.current = z;
+    setZoom(z);
+    const fx = (left + freeW / 2) / width;
+    const fy = (top + freeH / 2) / height;
+    setPan({
+      x: BUILDING.x + BUILDING.w / 2 - fx * (FRAME.w / z) - FRAME.x,
+      y: BUILDING.y + BUILDING.h / 2 - fy * (FRAME.h / z) - FRAME.y,
+    });
+  }, [fitToken]);
+
   function changeZoom(direction) {
-    const next = Math.min(3.6, Math.max(0.8, zoom * (direction > 0 ? 1.15 : 0.87)));
+    const next = Math.min(3.6, Math.max(0.5, zoom * (direction > 0 ? 1.15 : 0.87)));
     const cx = FRAME.x + pan.x + FRAME.w / zoom / 2;
     const cy = FRAME.y + pan.y + FRAME.h / zoom / 2;
     const viewW = FRAME.w / next;
@@ -402,29 +443,23 @@ export default function CommandCenter() {
 
       <div className={navCollapsed ? "workspace is-slim" : "workspace"}>
         <aside className={navCollapsed ? "nav is-collapsed" : "nav"}>
-          <div className="nav-head">
-            <span className="nav-mark" aria-hidden="true">
-              +
-            </span>
-            <strong>Tiger</strong>
-            <button
-              type="button"
-              className="nav-collapse"
-              aria-label={navCollapsed ? "Expand sidebar" : "Minimize sidebar"}
-              aria-expanded={!navCollapsed}
-              onClick={() => setNavCollapsed((open) => !open)}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d={navCollapsed ? "M8 6l5 6-5 6M13 6l5 6-5 6" : "M16 6l-5 6 5 6M11 6l-5 6 5 6"}
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="nav-collapse"
+            aria-label={navCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+            aria-expanded={!navCollapsed}
+            onClick={() => setNavCollapsed((open) => !open)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d={navCollapsed ? "M8 6l5 6-5 6M13 6l5 6-5 6" : "M16 6l-5 6 5 6M11 6l-5 6 5 6"}
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
 
           <div className="nav-list">
             {NAV.map((item) => (
@@ -471,6 +506,7 @@ export default function CommandCenter() {
 
         <main className="stage">
           <div
+            ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
             onClick={() => {
               setSearchOpen(false);
