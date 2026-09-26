@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#E6EDF6">
-<link rel="icon" type="image/png" href="/logo.png">
+<link rel="icon" type="image/png" href="/logo-tiger.png">
 <title>SurgeCommand — Real-Time Hospital Surge Command</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -141,7 +141,7 @@ html{scroll-behavior:smooth}
   line-height:1;color:#202940;white-space:nowrap;text-decoration:none}
 .nav .n-explore:hover,.nav .n-product:hover{color:#2f5f9e}
 .mark{border-radius:calc(10*var(--u));overflow:hidden}
-.mark img{width:100%;height:100%;object-fit:cover;transform:scale(1.9);display:block}
+.mark img{width:100%;height:100%;object-fit:cover;transform:scale(1.02);display:block}
 .nav i{display:block}
 .n-home{left:calc(36*var(--u));top:calc(22*var(--u));width:calc(21.3*var(--u));height:calc(22.4*var(--u))}
 .n-explore{left:calc(72*var(--u));top:calc(26*var(--u))}
@@ -524,15 +524,13 @@ html.pre .dot{scale:0}
 
 .s-platform-rdmd{position:relative;overflow:hidden;background:linear-gradient(180deg,#f6f7fb 0%,#eef3f9 100%);padding:clamp(72px,9vw,140px) 0;color:var(--s-ink)}
 .s-platform-rdmd .s-wrap{position:relative;z-index:2}
-.s-platform-rdmd .platform-top{display:grid;grid-template-columns:1.3fr .9fr;align-items:flex-end;gap:32px;margin-bottom:28px}
+.s-platform-rdmd .platform-top{margin-bottom:28px}
 .s-platform-rdmd .platform-copy-box{padding-left:4px}
 .s-platform-rdmd .s-eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--s-accent)}
 .s-platform-rdmd .s-eyebrow::before{content:"";width:18px;height:1.5px;background:currentColor;border-radius:2px}
-.s-platform-rdmd .platform-title{margin:18px 0 16px;font-size:clamp(52px,6vw,112px);font-weight:400;letter-spacing:-.055em;line-height:.9;color:var(--s-ink);font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif;font-style:normal;max-width:720px}
+.s-platform-rdmd .platform-title{margin:18px 0 16px;font-size:clamp(52px,6vw,112px);font-weight:400;letter-spacing:-.055em;line-height:.9;color:var(--s-ink);font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif;font-style:normal;max-width:none}
 .s-platform-rdmd .platform-copy{max-width:760px;margin:0;color:var(--s-muted);font-size:clamp(17px,1.6vw,21px);line-height:1.55;font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif}
 .s-platform-rdmd .platform-visual{position:relative;min-height:260px}
-.s-platform-rdmd .platform-visual::before{content:"";position:absolute;inset:0 0 0 6%;background:radial-gradient(ellipse at center,rgba(47,95,158,.12),rgba(47,95,158,0) 60%);filter:blur(8px);opacity:.8}
-.s-platform-rdmd .platform-visual::after{content:"";position:absolute;right:-6%;bottom:-10%;width:72%;height:116%;border-radius:42% 58% 50% 50% / 44% 38% 62% 56%;background:radial-gradient(circle at 25% 18%,rgba(255,255,255,.8),rgba(205,220,238,.82) 18%,rgba(130,156,190,.85) 52%,rgba(47,95,158,.96) 100%);box-shadow:inset 0 0 90px rgba(255,255,255,.35),0 26px 60px rgba(47,95,158,.18);transform:rotate(12deg);opacity:.9;filter:blur(1.5px)}
 .s-platform-rdmd .platform-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;background:rgba(15,27,49,.04);border:1px solid var(--s-line)}
 .s-platform-rdmd .platform-card{padding:28px 26px 24px;border:1px solid var(--s-line);background:#fff;min-height:272px;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(15,27,49,.03);transition:transform .28s ease, box-shadow .28s ease, border-color .28s ease, background-color .28s ease}
 .s-platform-rdmd .platform-card:hover{transform:translateY(-4px);border-color:rgba(47,95,158,.18);box-shadow:0 18px 36px -24px rgba(15,27,49,.28);background:#fff}
@@ -601,7 +599,7 @@ html.pre .dot{scale:0}
 .s-foot-grid{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:32px}
 .s-foot-brand{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:600;letter-spacing:-.03em;color:var(--s-ink);text-decoration:none}
 .s-foot-brand span{width:34px;height:34px;border-radius:9px;overflow:hidden;display:block}
-.s-foot-brand img{width:100%;height:100%;object-fit:cover;transform:scale(1.9)}
+.s-foot-brand img{width:100%;height:100%;object-fit:cover;transform:scale(1.02)}
 .s-foot p.s-foot-note{font-size:14px;line-height:1.6;color:var(--s-muted);margin-top:14px;max-width:300px}
 .s-foot h4{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8A94A8}
 .s-foot ul{list-style:none;padding:0;margin-top:16px;display:grid;gap:10px}
@@ -675,7 +673,7 @@ html.pre .dot{scale:0}
     <div class="stack">
       <div class="row">
         <a class="brand l t" style="--x:68;--y:47" href="/app.html">
-          <span class="mark"><img src="/logo.png" alt=""></span>
+          <span class="mark"><img src="/logo-tiger.png" alt=""></span>
           <b class="sx" style="--sx:0.894">SurgeCommand</b>
         </a>
 
@@ -766,9 +764,7 @@ html.pre .dot{scale:0}
         <div class="platform-copy-box">
           <span class="s-eyebrow">The platform</span>
           <h2 class="platform-title">One command center for the entire surge</h2>
-          <p class="platform-copy">From the first ambulance call to the last discharge, SurgeCommand keeps every bed, patient and critical resource in a single live view your whole team can act on.</p>
         </div>
-        <div class="platform-visual" aria-hidden="true"></div>
       </div>
 
       <div class="platform-grid">
@@ -776,37 +772,31 @@ html.pre .dot{scale:0}
           <span class="platform-no">01</span>
           <h3>Live digital twin</h3>
           <p>Every bed on every floor in 2D and 3D, color-coded by triage level the instant a status changes.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
         <article class="platform-card">
           <span class="platform-no">02</span>
           <h3>AI triage scoring</h3>
           <p>Vitals and field notes are scored into ESI levels in seconds, so the most critical patients always move first.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
         <article class="platform-card">
           <span class="platform-no">03</span>
           <h3>Network load balancing</h3>
           <p>When a unit fills up, patients are routed to partner hospitals with open beds and the right specialty.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
         <article class="platform-card">
           <span class="platform-no">04</span>
           <h3>Paramedic voice intake</h3>
           <p>Crews dictate from the scene. A bed is triaged and reserved before the ambulance reaches the bay.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
         <article class="platform-card">
           <span class="platform-no">05</span>
           <h3>Reverse triage</h3>
           <p>Surface stable patients ready to step down, freeing critical beds exactly when every one counts.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
         <article class="platform-card">
           <span class="platform-no">06</span>
           <h3>Live resource tracking</h3>
           <p>Ventilators, blood units and OR suites are tracked in real time, with alerts before anything runs out.</p>
-          <a href="#">Learn more <span>→</span></a>
         </article>
       </div>
     </div>
@@ -934,7 +924,7 @@ html.pre .dot{scale:0}
     <div class="s-wrap">
       <div class="s-foot-grid">
         <div>
-          <a class="s-foot-brand" href="#top"><span><img src="/logo.png" alt=""></span>SurgeCommand</a>
+          <a class="s-foot-brand" href="#top"><span><img src="/logo-tiger.png" alt=""></span>SurgeCommand</a>
           <p class="s-foot-note">Real-time command for hospital surges and mass-casualty events. Built at TigerHacks.</p>
         </div>
         <div>
