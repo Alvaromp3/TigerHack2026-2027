@@ -40,6 +40,7 @@ class Patient(Base):
     age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     chief_complaint: Mapped[str | None] = mapped_column(String(160), nullable=True)
     diagnosis: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    stay_ticks: Mapped[int] = mapped_column(Integer, default=0)
 
     room: Mapped[Room] = relationship(back_populates="patient")
 

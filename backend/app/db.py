@@ -25,6 +25,8 @@ def init_db():
         conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS age INTEGER"))
         conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS chief_complaint VARCHAR(160)"))
         conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS diagnosis VARCHAR(160)"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS stay_ticks INTEGER"))
+        conn.execute(text("UPDATE patients SET stay_ticks = 3 WHERE stay_ticks IS NULL"))
         conn.execute(text("ALTER TABLE flow_events ADD COLUMN IF NOT EXISTS kind VARCHAR(16) DEFAULT 'move'"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS clean_type VARCHAR(16)"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS clean_priority INTEGER"))

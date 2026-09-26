@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CORE, FRAME } from "./floors";
+import { CORE, FRAME, spaceBucket } from "./floors";
 
 const SHELL = "M 5 3.2 H 75.6 V 40 L 60 56.6 H 5 Z";
 
@@ -61,8 +61,8 @@ function Stairs({ item }) {
         <path d="M8 20h4v-4h4v-4h4V8" fill="none" stroke="#fff" strokeWidth="2.4" />
         <circle cx="8" cy="8" r="2.2" fill="#fff" />
       </Pictogram>
-      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.72" fontWeight="700" fill="#4a78b0" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.22, paintOrder: "stroke" }}>
-        Stair
+      <text x={cx} y={item.y + item.h - 0.35} textAnchor="middle" fontSize="0.62" fontWeight="600" letterSpacing="0.04" fill="#3d5f8a" style={{ pointerEvents: "none" }}>
+        Stairs
       </text>
     </g>
   );
@@ -89,7 +89,7 @@ function Elevator({ item, active }) {
         <circle cx="16" cy="7" r="2" fill="#fff" />
         <path d="M5 18c.4-3 2-4.5 3-4.5s2.6 1.5 3 4.5H5zM13 18c.4-3 2-4.5 3-4.5s2.6 1.5 3 4.5h-6z" fill="#fff" />
       </Pictogram>
-      <text x={cx} y={item.y + item.h - 0.22} textAnchor="middle" fontSize="0.58" fontWeight="700" fill="#111827" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.18, paintOrder: "stroke" }}>
+      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.52" fontWeight="600" letterSpacing="0.03" fill="#1f2937" style={{ pointerEvents: "none" }}>
         Elev {item.label}
       </text>
     </g>
@@ -109,50 +109,62 @@ function shortUse(room) {
   return type;
 }
 
+function fitLabel(text, box, preferred) {
+  const glyphs = Math.max(String(text).length, 1);
+  const fitted = (box * 0.86) / (glyphs * 0.56);
+  return Math.max(0.38, Math.min(preferred, fitted));
+}
+
 function RoomTag({ room, selected }) {
-  const ink = { pointerEvents: "none", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.12, paintOrder: "stroke" };
+  const ink = "#1c2430";
+  const muted = "#4b5568";
   if (room.kind === "restroom") {
     return (
       <text
         x={room.x + room.w / 2}
-        y={room.y + room.h - 0.22}
+        y={room.y + room.h - 0.28}
         textAnchor="middle"
-        fontSize="0.7"
-        fontWeight="700"
-        fill="#92400e"
-        style={ink}
+        fontSize="0.52"
+        fontWeight="600"
+        letterSpacing="0.06"
+        fill="#9a6700"
+        style={{ pointerEvents: "none" }}
       >
         WC
       </text>
     );
   }
   const wide = room.w >= 6.5 || room.h >= 6;
-  const title = room.census ? room.id : (room.label || room.type);
-  const sub = room.h >= 3.8 && (room.census || wide) ? shortUse(room) : "";
-  const titleSize = Math.min(wide ? 1.25 : 1.05, room.w * 0.23, room.h * 0.22);
-  const subSize = Math.min(wide ? 0.72 : 0.58, titleSize * 0.62);
+  const title = room.census ? room.id : (room.label || room.type || "");
+  const sub = room.h >= 5.4 && room.w >= 4.2 && (room.census || wide) ? shortUse(room) : "";
+  const titleSize = fitLabel(title, room.w, wide ? 1.15 : 0.98);
+  const subSize = sub ? fitLabel(sub, room.w, Math.min(0.48, titleSize * 0.62)) : 0;
+  const cx = room.x + room.w / 2;
+  const cy = room.y + room.h / 2;
   return (
-    <g style={{ pointerEvents: "none" }}>
+    <g style={{ pointerEvents: "none" }} clipPath={`url(#label-${room.id})`}>
       <text
-        x={room.x + room.w / 2}
-        y={room.y + room.h / 2 - (sub ? titleSize * 0.15 : titleSize * 0.32)}
+        x={cx}
+        y={sub ? cy - subSize * 0.15 : cy}
         textAnchor="middle"
+        dominantBaseline="middle"
         fontSize={titleSize}
-        fontWeight="700"
-        fill={selected ? "#14532d" : "#020c21"}
-        style={ink}
+        fontWeight="650"
+        letterSpacing="0.02"
+        fill={selected ? "#0f172a" : ink}
       >
         {title}
       </text>
       {sub && (
         <text
-          x={room.x + room.w / 2}
-          y={room.y + room.h / 2 + subSize * 1.35}
+          x={cx}
+          y={cy + titleSize * 0.72}
           textAnchor="middle"
+          dominantBaseline="middle"
           fontSize={subSize}
-          fontWeight="700"
-          fill={selected ? "#14532d" : "#1e293b"}
-          style={ink}
+          fontWeight="520"
+          letterSpacing="0.01"
+          fill={muted}
         >
           {sub}
         </text>
@@ -171,9 +183,19 @@ function Lavatory({ x, y }) {
   );
 }
 
+const BUCKET_FILL = {
+  available: "#e7f6ee",
+  occupied: "#e7eef8",
+  cleaning: "#efe8f8",
+  reserved: "#fbf6df",
+  down: "#eef1f4",
+};
+
 export default function FloorPlan({
   floor,
   deptFilter,
+  spaceFilter = "all",
+  layer = "all",
   selectedId,
   showBeds,
   showLabels,
@@ -263,7 +285,7 @@ export default function FloorPlan({
     <svg
       ref={svgRef}
       className="floor-svg"
-      fontFamily="Source Sans 3, Segoe UI, sans-serif"
+      fontFamily="Inter, Segoe UI, sans-serif"
       viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
@@ -276,6 +298,11 @@ export default function FloorPlan({
         <clipPath id="plate">
           <path d={SHELL} />
         </clipPath>
+        {floor.rooms.map((room) => (
+          <clipPath key={room.id} id={`label-${room.id}`}>
+            <rect x={room.x + 0.12} y={room.y + 0.08} width={Math.max(0.2, room.w - 0.24)} height={Math.max(0.2, room.h - 0.16)} />
+          </clipPath>
+        ))}
         <filter id="plate-shadow" x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="0.35" stdDeviation="0.45" floodColor="#94a3b8" floodOpacity="0.45" />
         </filter>
@@ -287,25 +314,36 @@ export default function FloorPlan({
         {floor.rooms.map((room) => {
           const dim = deptFilter !== "all" && room.dept !== deptFilter;
           const selected = room.id === selectedId;
-          const picked = floor.rooms.find((item) => item.id === selectedId);
-          const sameWing = Boolean(picked && room.dept === picked.dept && room.kind !== "restroom");
+          const bucket = spaceBucket(room);
+          const statusMiss = spaceFilter !== "all" && bucket !== spaceFilter;
+          const layerMiss = layer === "beds" && !room.census;
           const door = doorGeom(room);
-          let fill = "#d9dee6";
-          if (sameWing) fill = "#c5e4f6";
-          if (selected) fill = "#c8f0d4";
+          let fill = BUCKET_FILL[bucket] || "#f4f7fb";
           if (room.kind === "restroom") fill = "#eef2f6";
+          const faded = dim || statusMiss || layerMiss;
           return (
-            <g key={room.id} data-room={room.id} className="map-hit" opacity={dim ? 0.3 : 1}>
+            <g key={room.id} data-room={room.id} className="map-hit" opacity={faded ? (statusMiss ? 0.18 : 0.35) : 1}>
               <rect
                 x={room.x}
                 y={room.y}
                 width={room.w}
                 height={room.h}
                 fill={fill}
-                stroke={selected ? "#15803d" : "#9aabbd"}
-                strokeWidth={selected ? 0.14 : 0.07}
-                strokeDasharray={selected ? "0.32 0.18" : undefined}
+                stroke={selected ? "#0f172a" : "#9aabbd"}
+                strokeWidth={selected ? 0.22 : 0.07}
               />
+              {showBeds && room.census && room.bed && (
+                <rect
+                  x={room.bed.x}
+                  y={room.bed.y}
+                  width={room.bed.w}
+                  height={room.bed.h}
+                  rx="0.12"
+                  fill={selected ? "#0f172a" : "#64748b"}
+                  opacity="0.55"
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {door && (
                 <line
                   x1={door.gap[0]}
@@ -338,9 +376,10 @@ export default function FloorPlan({
         x="66"
         y="60.5"
         textAnchor="end"
-        fontSize="4.2"
-        fontWeight="700"
-        fill="#e5e7eb"
+        fontSize="3.4"
+        fontWeight="600"
+        letterSpacing="0.08"
+        fill="#e8ecf1"
         style={{ pointerEvents: "none" }}
       >
         {floor.code === "B1" ? "B1" : `${floor.code.replace("F", "")}F`}

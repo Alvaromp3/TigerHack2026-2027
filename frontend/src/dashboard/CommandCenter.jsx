@@ -5,14 +5,16 @@ import FloorPlan from "./FloorPlan";
 import Capacity from "./Capacity";
 import Overview from "./Overview";
 import PatientFlow from "./PatientFlow";
-import TurnoverDesk from "./TurnoverDesk";
+import Reports from "./Reports";
 import {
   BUILDING,
   FRAME,
+  SPACE_FILTERS,
   STATUS,
   applyCensus,
   buildHospital,
   findRooms,
+  spaceBucket,
   summarize,
 } from "./floors";
 import { apiUrl } from "../api/client";
@@ -26,11 +28,9 @@ const NAV = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "capacity", label: "Capacity", icon: "bed" },
   { id: "flow", label: "Patient Flow", icon: "flow" },
-  { id: "turnover", label: "Bed turnover", icon: "broom" },
   { id: "staff", label: "Staff", icon: "users" },
   { id: "incidents", label: "Incidents", icon: "alert" },
   { id: "reports", label: "Reports", icon: "chart" },
-  { id: "settings", label: "Settings", icon: "gear" },
 ];
 
 const SFX_BY_DEPARTMENT = {
@@ -62,14 +62,89 @@ const SFX_BY_ROOM_ID = {
   ADMIN: "Trump.mp3",
 };
 
+const ROOM_VOICES = [
+  "voice-01-three-hours.mp3",
+  "voice-02-waiting-room.mp3",
+  "voice-03-psychological.mp3",
+  "voice-04-same-pill.mp3",
+  "voice-05-phone.mp3",
+  "voice-06-leaving.mp3",
+  "voice-07-smile.mp3",
+  "voice-08-beeping.mp3",
+  "voice-09-quick.mp3",
+  "voice-10-observe.mp3",
+  "voice-11-big-toe.mp3",
+  "voice-12-vacation.mp3",
+  "voice-13-five-minutes.mp3",
+  "voice-14-gown.mp3",
+  "voice-15-bill.mp3",
+  "voice-16-ulcer.mp3",
+  "voice-17-knee.mp3",
+  "voice-18-xray.mp3",
+  "voice-19-number.mp3",
+  "voice-20-paperwork.mp3",
+  "voice-21-meeting.mp3",
+  "voice-22-pills.mp3",
+  "voice-23-extra.mp3",
+  "voice-24-still.mp3",
+  "voice-25-loyalty.mp3",
+  "voice-26-bandage.mp3",
+  "voice-27-ice.mp3",
+  "voice-28-deluxe.mp3",
+  "voice-29-coffee.mp3",
+  "voice-30-clipboard.mp3",
+  "voice-31-sneeze.mp3",
+  "voice-32-intern.mp3",
+  "voice-33-thank-you.mp3",
+  "voice-34-my-name.mp3",
+  "voice-35-pain-gone.mp3",
+  "voice-36-warm-blanket.mp3",
+  "voice-37-not-scared.mp3",
+  "voice-38-kind-team.mp3",
+  "voice-39-breathe.mp3",
+  "voice-40-listened.mp3",
+  "voice-41-discharge.mp3",
+  "voice-42-five-stars.mp3",
+  "voice-43-family.mp3",
+  "voice-44-how-i-slept.mp3",
+  "voice-45-pain-two.mp3",
+  "voice-46-gentle-floor.mp3",
+  "voice-47-safe.mp3",
+  "voice-48-found-it.mp3",
+];
+
+const VOICE_DEPTS = new Set([
+  "icu",
+  "surgery",
+  "imaging",
+  "ed",
+  "trauma",
+  "med",
+  "surgward",
+  "pacu",
+  "pharmacy",
+  "waiting",
+  "outpatient",
+  "clinic",
+  "nurse",
+  "conference",
+]);
+
+function voiceForRoom(room) {
+  if (!VOICE_DEPTS.has(room.dept)) return null;
+  let hash = 0;
+  for (let i = 0; i < room.id.length; i += 1) {
+    hash = (Math.imul(hash, 31) + room.id.charCodeAt(i)) >>> 0;
+  }
+  return ROOM_VOICES[hash % ROOM_VOICES.length];
+}
+
 const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
   flow: "Every admit, floor move, OR case, discharge, and diversion.",
-  turnover: "Beds stay closed until housekeeping finishes and clean linen arrives from the basement.",
   staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
-  reports: "Reports stay off this demo. The live plate is the operational view.",
-  settings: "Settings stay off this demo. Floor maps and the elevator are local.",
+  reports: "Counts come from the live census and the last 200 flow events.",
   three: "3D is off. This command view is the measured 2D plate.",
 };
 
@@ -218,14 +293,6 @@ function Icon({ name }) {
       </svg>
     );
   }
-  if (name === "gear") {
-    return (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="M12 2.8v2.2M12 19v2.2M2.8 12h2.2M19 12h2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6" />
-      </svg>
-    );
-  }
   if (name === "search") {
     return (
       <svg {...common}>
@@ -314,7 +381,7 @@ function historyFor(room, movements = []) {
   }
   if (room.status === "cleaning") {
     return [
-      { time: "10:12", text: "Turnover in progress", tag: "Housekeeping" },
+      { time: "10:12", text: "Cleaning in progress", tag: "Housekeeping" },
       { time: "10:05", text: "Previous patient discharged", tag: "Nursing" },
     ];
   }
@@ -410,8 +477,6 @@ export default function CommandCenter() {
   const [surgeOn, setSurgeOn] = useState(false);
   const [transfers, setTransfers] = useState([]);
   const [roster, setRoster] = useState([]);
-  const [housekeepers, setHousekeepers] = useState([]);
-  const [linenAides, setLinenAides] = useState([]);
   const [movements, setMovements] = useState([]);
   const [flowLive, setFlowLive] = useState(false);
   const [flowSyncedAt, setFlowSyncedAt] = useState(null);
@@ -420,6 +485,9 @@ export default function CommandCenter() {
   const [bellOpen, setBellOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [spaceFilter, setSpaceFilter] = useState("all");
+  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [syncTick, setSyncTick] = useState(() => Date.now());
   const [zoom, setZoom] = useState(1.25);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fitToken, setFitToken] = useState(0);
@@ -430,13 +498,23 @@ export default function CommandCenter() {
   const sfxRef = useRef(null);
   const knownFlow = useRef(null);
   const zoomRef = useRef(1.25);
-  const startZoom = useRef(null);
   const [tab, setTab] = useState("overview");
   const [toast, setToast] = useState("");
   const [now, setNow] = useState(() => new Date());
 
   const floor = hospital.find((level) => level.id === floorId) || hospital[2];
   const summary = useMemo(() => summarize(floor), [floor]);
+  const spaceCounts = useMemo(() => {
+    const counts = { all: 0, available: 0, occupied: 0, cleaning: 0, reserved: 0, down: 0 };
+    for (const room of floor.rooms) {
+      if (!room.census) continue;
+      counts.all += 1;
+      const bucket = spaceBucket(room);
+      if (bucket) counts[bucket] += 1;
+    }
+    return counts;
+  }, [floor]);
+  const liveMap = nav === "live";
   const selected = floor.rooms.find((room) => room.id === selectedId) || null;
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
@@ -452,6 +530,12 @@ export default function CommandCenter() {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!liveMap) return undefined;
+    const timer = setInterval(() => setSyncTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [liveMap]);
 
   useEffect(() => {
     let stop = false;
@@ -470,8 +554,6 @@ export default function CommandCenter() {
           if (stop) return;
           setHospital((current) => applyCensus(current, census.rooms));
           setSurgeOn(Boolean(census.surge));
-          setHousekeepers(census.housekeepers || []);
-          setLinenAides(census.linen_aides || []);
         }
         if (transferRes.ok) {
           const body = await transferRes.json();
@@ -559,15 +641,16 @@ export default function CommandCenter() {
     setElevatorOpen(false);
     setHover(null);
     setNote(null);
+    setSummaryOpen(true);
     setFitToken((token) => token + 1);
-    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity") setNav("live");
+    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity" && nav !== "reports") setNav("live");
   }
 
   function playRoomSfx(id) {
     const room = floor.rooms.find((item) => item.id === id);
     if (!room) return;
 
-    const filename = SFX_BY_ROOM_ID[room.id] || SFX_BY_DEPARTMENT[room.dept];
+    const filename = SFX_BY_ROOM_ID[room.id] || voiceForRoom(room) || SFX_BY_DEPARTMENT[room.dept];
     if (!filename) return;
 
     sfxRef.current?.pause();
@@ -595,16 +678,17 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    const boards = ["overview", "capacity", "flow", "turnover", "incidents"];
+    const boards = ["overview", "capacity", "flow", "incidents", "reports"];
     const onBoard = boards.includes(nav);
     const stayingBoard = boards.includes(id);
     if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
     setNav(id);
-    if (id === "incidents" || stayingBoard) {
+    if (id === "live") {
       setNote(null);
+      setSummaryOpen(true);
       return;
     }
-    if (id === "live") {
+    if (id === "incidents" || stayingBoard) {
       setNote(null);
       return;
     }
@@ -712,7 +796,8 @@ export default function CommandCenter() {
   useLayoutEffect(() => {
     const stage = mapRef.current;
     if (!stage) return;
-    const stageRect = stage.getBoundingClientRect();
+    const frame = stage.querySelector(".map-body") || stage;
+    const stageRect = frame.getBoundingClientRect();
     const overview = stage.querySelector(".overview");
     const detail = stage.querySelector(".detail");
     const width = stageRect.width;
@@ -724,15 +809,11 @@ export default function CommandCenter() {
     const bottom = 36;
     const freeW = Math.max(160, width - left - right);
     const freeH = Math.max(160, height - top - bottom);
-    const bw = BUILDING.w + 1.2;
-    const bh = BUILDING.h + 1.2;
-    if (startZoom.current == null) {
-      startZoom.current = Math.max(
-        0.5,
-        Math.min(1.8, Math.min((FRAME.w * freeW) / (bw * width), (FRAME.h * freeH) / (bh * height))),
-      );
-    }
-    const z = startZoom.current;
+    const bw = BUILDING.w + 2.4;
+    const bh = BUILDING.h + 2.4;
+    const scaleW = (FRAME.w * freeW) / (bw * width);
+    const scaleH = (FRAME.h * freeH) / (bh * height);
+    const z = Math.max(0.22, Math.min(scaleW, scaleH));
     zoomRef.current = z;
     setZoom(z);
     const fx = (left + freeW / 2) / width;
@@ -743,8 +824,12 @@ export default function CommandCenter() {
     });
   }, [fitToken]);
 
+  function fitMap() {
+    setFitToken((token) => token + 1);
+  }
+
   function changeZoom(direction) {
-    const next = Math.min(3.6, Math.max(0.5, zoom * (direction > 0 ? 1.15 : 0.87)));
+    const next = Math.min(3.6, Math.max(0.22, zoom * (direction > 0 ? 1.15 : 0.87)));
     const cx = FRAME.x + pan.x + FRAME.w / zoom / 2;
     const cy = FRAME.y + pan.y + FRAME.h / zoom / 2;
     const viewW = FRAME.w / next;
@@ -914,8 +999,14 @@ export default function CommandCenter() {
 
           <div className="campus">
             <div className="campus-copy">
-              <img src="/main-hospital.jpg?v=3" alt="Main Hospital" />
-              <strong>Main Hospital</strong>
+              <div className="campus-photo">
+                <img src="/main-hospital.jpg?v=3" alt="Main Hospital" />
+                <div className="campus-meta">
+                  <span>Campus</span>
+                  <strong>Main Hospital</strong>
+                  <em>{floor.subtitle || floor.name}</em>
+                </div>
+              </div>
             </div>
             <div
               className="campus-floors"
@@ -1124,12 +1215,13 @@ export default function CommandCenter() {
               </div>
             </div>
           )}
-          {nav === "turnover" && (
-            <TurnoverDesk
+          {nav === "reports" && (
+            <Reports
               hospital={hospital}
-              housekeepers={housekeepers}
-              linenAides={linenAides}
               movements={movements}
+              transfers={transfers}
+              flowLive={flowLive}
+              syncedAt={flowSyncedAt}
               onOpenRoom={(floorId, roomId) => {
                 const level = hospital.find((item) => item.id === floorId);
                 const room = level?.rooms.find((item) => item.id === roomId);
@@ -1137,15 +1229,65 @@ export default function CommandCenter() {
               }}
             />
           )}
-          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "turnover" && (
+          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "reports" && (
           <div
             ref={mapRef}
-            className={rightOpen ? "map-stage has-detail" : "map-stage"}
+            className={`map-stage${rightOpen ? " has-detail" : ""}${liveMap ? " is-live" : ""}`}
             onClick={() => {
               setSearchOpen(false);
               setBellOpen(false);
             }}
           >
+            {liveMap && (
+              <header className="live-bar">
+                <div className="live-bar-top">
+                  <div>
+                    <p className="live-kicker">Live map · {floor.code}</p>
+                    <h2 className="live-title">{floor.subtitle || floor.name}</h2>
+                  </div>
+                  <div className="live-actions">
+                    <span className={flowLive ? "live-sync" : "live-sync is-wait"}>
+                      <i />
+                      {flowLive && flowSyncedAt
+                        ? `Simulation · Synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
+                        : "Simulation · Waiting"}
+                    </span>
+                    <button
+                      type="button"
+                      className="live-btn is-on"
+                      onClick={() => {
+                        setSummaryOpen(true);
+                        fitMap();
+                      }}
+                    >
+                      Floor summary
+                    </button>
+                  </div>
+                </div>
+                <div className="space-filters" role="toolbar" aria-label="Filter spaces">
+                  {SPACE_FILTERS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={spaceFilter === item.id ? "space-chip is-on" : "space-chip"}
+                      onClick={() => setSpaceFilter(item.id)}
+                    >
+                      {item.dot && <i style={{ background: item.dot }} />}
+                      {item.label}
+                      <b>{spaceCounts[item.id]}</b>
+                    </button>
+                  ))}
+                </div>
+                {spaceFilter !== "all" && spaceCounts[spaceFilter] === 0 && (
+                  <p className="space-empty">
+                    No {SPACE_FILTERS.find((item) => item.id === spaceFilter)?.empty} on {floor.code}.{" "}
+                    <button type="button" onClick={() => setSpaceFilter("all")}>Clear filter</button>
+                  </p>
+                )}
+              </header>
+            )}
+            <div className="map-body">
+            {(!liveMap || summaryOpen) && (
             <aside className="overview">
               <h2>{floor.name} overview</h2>
               <p className="overview-sub">{floor.subtitle}</p>
@@ -1176,11 +1318,14 @@ export default function CommandCenter() {
                 ))}
               </ul>
             </aside>
+            )}
 
             <div className="map-canvas">
             <FloorPlan
               floor={floor}
               deptFilter="all"
+              spaceFilter={liveMap ? spaceFilter : "all"}
+              layer="all"
               selectedId={selectedId}
               showBeds={showBeds}
               showLabels={showLabels}
@@ -1203,18 +1348,30 @@ export default function CommandCenter() {
               onStair={() => setToast("Stairs stay on this floor. Use the elevator to change maps.")}
             />
 
-            <div className="zoom-tools">
+            <div className="zoom-tools" role="group" aria-label="Zoom">
               <button type="button" onClick={() => changeZoom(1)} aria-label="Zoom in">
-                +
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                  <path d="M7 1.5v11M1.5 7h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
               </button>
               <button type="button" onClick={() => changeZoom(-1)} aria-label="Zoom out">
-                −
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                  <path d="M1.5 7h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
               </button>
             </div>
-            <div className="legend">
-              <span><i className="lg lg-elev" /> Elevator</span>
-              <span><i className="lg lg-stair" /> Staircase</span>
-              <span><i className="lg lg-wc" /> Lavatory</span>
+            <div className={liveMap ? "legend legend-status" : "legend"}>
+              {liveMap ? (
+                SPACE_FILTERS.filter((item) => item.dot).map((item) => (
+                  <span key={item.id}><i className="lg-dot" style={{ background: item.dot }} /> {item.label}</span>
+                ))
+              ) : (
+                <>
+                  <span><i className="lg lg-elev" /> Elevator</span>
+                  <span><i className="lg lg-stair" /> Staircase</span>
+                  <span><i className="lg lg-wc" /> Lavatory</span>
+                </>
+              )}
             </div>
             {elevatorOpen && (
               <ElevatorPanel
@@ -1295,6 +1452,7 @@ export default function CommandCenter() {
                 )}
               </div>
             )}
+            </div>
           </div>
           )}
         </main>
@@ -1493,7 +1651,7 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], q
               <p className="kicker">No patient assigned</p>
               <p className="detail-copy">
                 {room.status === "cleaning"
-                  ? "This bed is in turnover. It stays closed until housekeeping finishes and clean linen arrives."
+                  ? "This bed is closed for cleaning. It stays closed until housekeeping finishes and clean linen arrives."
                   : room.census
                     ? "This bed is open for assignment. Declare surge or wait for the next admit from triage."
                     : "This space is not an inpatient bed — use it for support workflow only."}

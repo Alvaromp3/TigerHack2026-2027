@@ -55,6 +55,25 @@ export const STATUS = {
 };
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
+
+export const SPACE_FILTERS = [
+  { id: "all", label: "All spaces" },
+  { id: "available", label: "Available", empty: "available rooms", dot: "#16a34a" },
+  { id: "occupied", label: "Occupied", empty: "occupied rooms", dot: "#2563eb" },
+  { id: "cleaning", label: "Needs cleaning", empty: "rooms that need cleaning", dot: "#7c3aed" },
+  { id: "reserved", label: "Reserved", empty: "reserved rooms", dot: "#ca8a04" },
+  { id: "down", label: "Out of service", empty: "out of service rooms", dot: "#111827" },
+];
+
+export function spaceBucket(room) {
+  if (!room?.census) return null;
+  if (room.status === "available") return "available";
+  if (room.status === "cleaning") return "cleaning";
+  if (room.status === "blocked") return "down";
+  if (room.status === "reserved") return "reserved";
+  if (OCCUPIED.has(room.status)) return "occupied";
+  return null;
+}
 const GIVEN = [
   "Sofia", "James", "Noah", "Amina", "Helen", "Mateo", "Grace", "Owen",
   "Priya", "Samuel", "Lila", "Jonah", "Emma", "Hugo", "Nora", "Eliot",
@@ -98,7 +117,7 @@ function area(w, h) {
 
 function activity(status, label) {
   if (status === "available") return [{ time: "09:40", text: "Bed marked ready", tag: "Housekeeping" }];
-  if (status === "cleaning") return [{ time: "10:12", text: "Turnover in progress", tag: "Housekeeping" }];
+  if (status === "cleaning") return [{ time: "10:12", text: "Cleaning in progress", tag: "Housekeeping" }];
   if (status === "critical") {
     return [
       { time: "10:18", text: `${label} acuity raised to critical`, tag: "Charge nurse" },

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -98,22 +98,33 @@ def transfers(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/flow")
-def flow(db: Session = Depends(get_db)):
-    rows = db.scalars(select(FlowEvent).order_by(FlowEvent.id.desc()).limit(40)).all()
+def _flow_payload(row: FlowEvent):
     return {
-        "events": [
-            {
-                "id": row.id,
-                "patient_name": row.patient_name,
-                "message": row.message,
-                "kind": row.kind,
-                "room_id": row.room_id,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in rows
-        ]
+        "id": row.id,
+        "patient_name": row.patient_name,
+        "message": row.message,
+        "kind": row.kind,
+        "room_id": row.room_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+
+
+@router.get("/flow")
+def flow(q: str | None = None, db: Session = Depends(get_db)):
+    stmt = select(FlowEvent).order_by(FlowEvent.id.desc())
+    needle = (q or "").strip()
+    if needle:
+        like = f"%{needle}%"
+        stmt = stmt.where(or_(
+            FlowEvent.patient_name.ilike(like),
+            FlowEvent.message.ilike(like),
+            FlowEvent.room_id.ilike(like),
+            FlowEvent.kind.ilike(like),
+        )).limit(100)
+    else:
+        stmt = stmt.limit(200)
+    rows = db.scalars(stmt).all()
+    return {"events": [_flow_payload(row) for row in rows]}
 
 
 @router.get("/staff")

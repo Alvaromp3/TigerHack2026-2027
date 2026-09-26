@@ -583,7 +583,7 @@ function Sankey({ admit, transfer, discharge, divert, turnover }) {
   const rightItems = [
     { id: "discharge", label: "Discharge", value: discharge, color: "#8ea4b4" },
     { id: "divert", label: "Divert", value: divert, color: "#d7b56a" },
-    { id: "turnover", label: "Turnover", value: turnover, color: "#9dbeae" },
+    { id: "turnover", label: "Opened", value: turnover, color: "#9dbeae" },
   ];
   const layout = useMemo(() => buildSankey(leftItems, rightItems, top, band), [admit, transfer, discharge, divert, turnover, band]);
   const x1 = 168;

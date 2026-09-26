@@ -33,6 +33,7 @@ def seed_if_empty(db: Session):
             age=spec.get("age"),
             chief_complaint=spec.get("chief_complaint"),
             diagnosis=spec.get("diagnosis"),
+            stay_ticks=3,
         ))
     db.add(HospitalState(id=1, surge=False, admit_index=0, tick_count=0))
     db.add(FlowEvent(
