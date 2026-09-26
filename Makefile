@@ -8,26 +8,26 @@ FRONTEND_PORT := 5173
 up: install
 	@$(MAKE) --no-print-directory down
 	@mkdir -p $(PID_DIR) $(LOG_DIR)
-	@echo "Levantando backend en http://127.0.0.1:$(BACKEND_PORT)"
-	@cd backend && { nohup .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port $(BACKEND_PORT) > ../$(LOG_DIR)/backend.log 2>&1 & echo $$! > ../$(PID_DIR)/backend.pid; }
-	@echo "Levantando frontend en http://127.0.0.1:$(FRONTEND_PORT)"
-	@cd frontend && { nohup npm run dev -- --host 127.0.0.1 --port $(FRONTEND_PORT) --strictPort > ../$(LOG_DIR)/frontend.log 2>&1 & echo $$! > ../$(PID_DIR)/frontend.pid; }
+	@echo "Levantando backend en http://localhost:$(BACKEND_PORT)"
+	@cd backend && { nohup .venv/bin/uvicorn app.main:app --reload --host localhost --port $(BACKEND_PORT) > ../$(LOG_DIR)/backend.log 2>&1 & echo $$! > ../$(PID_DIR)/backend.pid; }
+	@echo "Levantando frontend en http://localhost:$(FRONTEND_PORT)"
+	@cd frontend && { nohup npm run dev -- --host localhost --port $(FRONTEND_PORT) --strictPort > ../$(LOG_DIR)/frontend.log 2>&1 & echo $$! > ../$(PID_DIR)/frontend.pid; }
 	@echo "Esperando a que arranquen..."
 	@i=0; \
-	until curl -sf http://127.0.0.1:$(BACKEND_PORT)/api/health >/dev/null 2>&1; do \
+	until curl -sf http://localhost:$(BACKEND_PORT)/api/health >/dev/null 2>&1; do \
 		i=$$((i + 1)); \
 		if [ $$i -ge 60 ]; then echo "El backend no respondió. Revisa $(LOG_DIR)/backend.log"; exit 1; fi; \
 		sleep 0.5; \
 	done
 	@i=0; \
-	until curl -sf -o /dev/null http://127.0.0.1:$(FRONTEND_PORT)/; do \
+	until curl -sf -o /dev/null http://localhost:$(FRONTEND_PORT)/; do \
 		i=$$((i + 1)); \
 		if [ $$i -ge 60 ]; then echo "El frontend no respondió. Revisa $(LOG_DIR)/frontend.log"; exit 1; fi; \
 		sleep 0.5; \
 	done
 	@echo "Listo."
-	@echo "  Backend   http://127.0.0.1:$(BACKEND_PORT)  (docs: /docs)"
-	@echo "  Frontend  http://127.0.0.1:$(FRONTEND_PORT)"
+	@echo "  Backend   http://localhost:$(BACKEND_PORT)  (docs: /docs)"
+	@echo "  Frontend  http://localhost:$(FRONTEND_PORT)"
 	@echo "  Logs      $(LOG_DIR)/backend.log  $(LOG_DIR)/frontend.log"
 
 down:
