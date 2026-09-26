@@ -191,7 +191,6 @@ export default function CommandCenter() {
   const [floorId, setFloorId] = useState("F3");
   const [selectedId, setSelectedId] = useState("ICU-304");
   const [hover, setHover] = useState(null);
-  const [deptFilter, setDeptFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [nav, setNav] = useState("live");
@@ -201,7 +200,6 @@ export default function CommandCenter() {
   const [surgeOn, setSurgeOn] = useState(false);
   const [badge, setBadge] = useState(1);
   const [bellOpen, setBellOpen] = useState(false);
-  const [layersOpen, setLayersOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [zoom, setZoom] = useState(1.25);
@@ -230,7 +228,6 @@ export default function CommandCenter() {
         setElevatorOpen(false);
         setSearchOpen(false);
         setBellOpen(false);
-        setLayersOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -249,7 +246,6 @@ export default function CommandCenter() {
   function goToFloor(id) {
     setFloorId(id);
     setSelectedId(null);
-    setDeptFilter("all");
     setElevatorOpen(false);
     setHover(null);
     setPan({ x: 0, y: 0 });
@@ -260,7 +256,6 @@ export default function CommandCenter() {
   function openHit(hit) {
     setFloorId(hit.floor.id);
     setSelectedId(hit.room.id);
-    setDeptFilter("all");
     setNav("live");
     setNote(null);
     setElevatorOpen(false);
@@ -451,7 +446,7 @@ export default function CommandCenter() {
 
           <div className="campus">
             <div className="campus-copy">
-              <img src="/main-hospital.jpg" alt="Main Hospital" />
+              <img src="/main-hospital.jpg?v=3" alt="Main Hospital" />
               <strong>Main Hospital</strong>
             </div>
             <div className="campus-floors" role="group" aria-label="Floors">
@@ -475,69 +470,6 @@ export default function CommandCenter() {
         </aside>
 
         <main className="stage">
-          <div className="toolbar">
-            <button type="button" className="tool-select" disabled>
-              Main Hospital
-            </button>
-            <label className="tool-select">
-              <span className="sr">Floor</span>
-              <select value={floor.id} onChange={(event) => goToFloor(event.target.value)} aria-label="Floor">
-                {hospital.map((level) => (
-                  <option key={level.id} value={level.id}>
-                    {level.name} — {level.subtitle}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="tool-select">
-              <span className="sr">Department</span>
-              <select
-                value={deptFilter}
-                onChange={(event) => setDeptFilter(event.target.value)}
-                aria-label="Department"
-              >
-                <option value="all">All departments</option>
-                {summary.departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="mode">
-              <button type="button" className="is-on">
-                2D
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setNav("settings");
-                  setNote(NOTES.three);
-                  setElevatorOpen(false);
-                }}
-              >
-                3D
-              </button>
-            </div>
-            <div className="layers-wrap">
-              <button type="button" className="tool-select" onClick={() => setLayersOpen((open) => !open)}>
-                Layers
-              </button>
-              {layersOpen && (
-                <div className="layers-pop">
-                  <label>
-                    <input type="checkbox" checked={showBeds} onChange={() => setShowBeds((v) => !v)} />
-                    Beds and status
-                  </label>
-                  <label>
-                    <input type="checkbox" checked={showLabels} onChange={() => setShowLabels((v) => !v)} />
-                    Room names
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-
           <div
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
             onClick={() => {
@@ -579,7 +511,7 @@ export default function CommandCenter() {
             <div className="map-canvas">
             <FloorPlan
               floor={floor}
-              deptFilter={deptFilter}
+              deptFilter="all"
               selectedId={selectedId}
               showBeds={showBeds}
               showLabels={showLabels}
