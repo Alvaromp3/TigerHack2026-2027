@@ -28,6 +28,35 @@ const NAV = [
   { id: "settings", label: "Settings", icon: "gear" },
 ];
 
+const SFX_BY_DEPARTMENT = {
+  icu: "Intesive Care.mp3",
+  surgery: "Surgery.mp3",
+  imaging: "Radiology.mp3",
+  ed: "Emergency&Trauma.mp3",
+  trauma: "Emergency&Trauma.mp3",
+  med: "Clinic.mp3",
+  surgward: "Surgery.mp3",
+  pacu: "Support&Recovery.mp3",
+  pharmacy: "Clinic.mp3",
+  waiting: "Waiting(cut).mp3",
+  outpatient: "Clinic.mp3",
+  support: "Support&Recovery.mp3",
+  nurse: "Staff(cut).mp3",
+  spd: "Surgery.mp3",
+  storage: "Storage.mp3",
+  morgue: "Storage.mp3",
+  mechanical: "Storage.mp3",
+  dock: "Storage.mp3",
+  clinic: "Clinic.mp3",
+  admin: "Admin.mp3",
+  conference: "Conference.mp3",
+};
+
+const SFX_BY_ROOM_ID = {
+  REG: "Registration.mp3",
+  ADMIN: "Trump.mp3",
+};
+
 const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
@@ -190,8 +219,8 @@ function Stat({ tone, label, value }) {
 
 export default function CommandCenter() {
   const [hospital, setHospital] = useState(() => buildHospital());
-  const [floorId, setFloorId] = useState("F3");
-  const [selectedId, setSelectedId] = useState("ICU-304");
+  const [floorId, setFloorId] = useState("F1");
+  const [selectedId, setSelectedId] = useState("ED-T1");
   const [hover, setHover] = useState(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -208,6 +237,7 @@ export default function CommandCenter() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fitToken, setFitToken] = useState(0);
   const mapRef = useRef(null);
+  const sfxRef = useRef(null);
   const zoomRef = useRef(1.25);
   const startZoom = useRef(null);
   const [tab, setTab] = useState("overview");
@@ -257,6 +287,24 @@ export default function CommandCenter() {
     setNote(null);
     setFitToken((token) => token + 1);
     if (nav !== "incidents") setNav("live");
+  }
+
+  function playRoomSfx(id) {
+    const room = floor.rooms.find((item) => item.id === id);
+    if (!room) return;
+
+    const filename = SFX_BY_ROOM_ID[room.id] || SFX_BY_DEPARTMENT[room.dept];
+    if (!filename) return;
+
+    sfxRef.current?.pause();
+    const audio = new Audio(`/sfx/${filename}`);
+    sfxRef.current = audio;
+    if (filename.includes("(cut)")) {
+      audio.addEventListener("timeupdate", () => {
+        if (audio.currentTime >= 10) audio.pause();
+      });
+    }
+    audio.play().catch(() => {});
   }
 
   function openHit(hit) {
@@ -560,6 +608,7 @@ export default function CommandCenter() {
                 setZoom(nextZoom);
               }}
               onSelect={(id) => {
+                playRoomSfx(id);
                 setSelectedId(id);
                 setNav("live");
                 setNote(null);
