@@ -11,6 +11,7 @@ import {
   summarize,
 } from "./floors";
 import "./dashboard.css";
+import logo from "./logo.png";
 
 const NAV = [
   { id: "live", label: "Live Map", icon: "map" },
@@ -322,10 +323,10 @@ export default function CommandCenter() {
     <div className="shell">
       <header className="topbar">
         <div className="brand">
-          <span className="cross" aria-hidden="true">
-            +
+          <span className="brand-mark" aria-hidden="true">
+            <img className="brand-logo" src={logo} alt="" />
           </span>
-          <div>
+          <div className="brand-text">
             <strong>Tiger Memorial Hospital</strong>
             <small>SURGE COMMAND</small>
           </div>
@@ -344,7 +345,10 @@ export default function CommandCenter() {
             onFocus={() => setSearchOpen(true)}
             aria-label="Search the hospital"
           />
-          <kbd>⌘K</kbd>
+          <span className="search-keys" aria-hidden="true">
+            <kbd>⌘</kbd>
+            <kbd>K</kbd>
+          </span>
           {searchOpen && query.trim() && (
             <div className="search-pop">
               {hits.length === 0 && <p className="muted">No match on any floor.</p>}
@@ -380,6 +384,7 @@ export default function CommandCenter() {
             )}
           </div>
           <LoginButton />
+          <span className="tool-divider" aria-hidden="true" />
           <div className="clock">
             <span>{dateLabel}</span>
             <strong>{clock}</strong>
