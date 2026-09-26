@@ -1,4 +1,4 @@
-"""One random legal census change every tick."""
+"""One random legal census change every tick, plus the housekeeping queue."""
 
 import logging
 import random
@@ -8,12 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.catalog import DESTINATIONS, OCCUPIED, clinical_case, crew, fresh_patient_name
-from app.models import Death, FlowEvent, HospitalState, Patient, Room, Transfer
+from app.models import Death, FlowEvent, HospitalState, Housekeeper, LinenAide, Patient, Room, Transfer
 
 log = logging.getLogger(__name__)
 write_lock = threading.Lock()
 TICK_SECONDS = 9
 DEATH_CHANCE = 0.08
+CLEAN_TICKS = {"stat": 2, "standard": 4, "terminal": 8}
+LINEN_STAGE_TICKS = {"pickup": 1, "wash": 2, "deliver": 1}
+LINEN_NEXT = {"pickup": "wash", "wash": "deliver"}
+LINEN_ACTIVE = ("pickup", "wash", "deliver")
+ISOLATION_MARKERS = ("sepsis", "c. diff", "c.diff", "covid", "mrsa", "tb", "tubercul", "isolation")
 
 
 def tick(db: Session):
@@ -21,11 +26,16 @@ def tick(db: Session):
         state = db.get(HospitalState, 1)
         if state is not None:
             state.tick_count += 1
+        cleaned = _advance_cleaning(db)
+        delivered = _advance_linen(db)
         action = _roll(db)
-        if action:
-            log.info("census tick: %s", action)
+        _assign_housekeepers(db)
+        _assign_linen(db)
+        summary = " · ".join(part for part in (cleaned, delivered, action) if part)
+        if summary:
+            log.info("census tick: %s", summary)
         db.commit()
-        return action
+        return action or cleaned
 
 
 def declare_surge(db: Session) -> int:
@@ -131,7 +141,7 @@ def _roll(db: Session):
     if options:
         chosen = random.choice(options)
         return chosen(db) if chosen is _leave_or else chosen()
-    return _clean_one(db)
+    return None
 
 
 def _admit(db: Session, floor_id: str, prefix: str):
@@ -159,6 +169,7 @@ def _admit(db: Session, floor_id: str, prefix: str):
     )
     db.add(patient)
     bed.status = acuity
+    _clear_clean(bed)
     _log(db, name, f"{name} admitted to {bed.id}", bed.id, "admit")
     return f"admit {name}"
 
@@ -205,8 +216,9 @@ def _discharge(db: Session, floor_id: str, dept=None, prefix=None):
     room = patient.room
     name = patient.name
     room_id = room.id
+    clinical = _clinical_text(patient)
     db.delete(patient)
-    room.status = "cleaning"
+    _vacate(db, room, clinical)
     _log(db, name, f"{name} discharged from {room_id}", room_id, "discharge")
     return f"discharge {name}"
 
@@ -233,6 +245,7 @@ def _die(db: Session, patient: Patient):
     room = patient.room
     name = patient.name
     room_id = room.id
+    clinical = _clinical_text(patient)
     db.add(Death(
         patient_name=name,
         age=patient.age,
@@ -240,19 +253,215 @@ def _die(db: Session, patient: Patient):
         room_id=room_id,
     ))
     db.delete(patient)
-    room.status = "cleaning"
+    _vacate(db, room, clinical)
     _log(db, name, f"{name} died in {room_id}", room_id, "death")
     return f"death {name}"
 
 
-def _clean_one(db: Session):
-    rooms = list(db.scalars(select(Room).where(Room.status == "cleaning")).all())
-    if not rooms:
+def ensure_cleaning_queue(db: Session):
+    """Queue beds already in cleaning, and put free housekeepers on the front."""
+    db.flush()
+    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+    for keeper in keepers:
+        if not keeper.room_id:
+            continue
+        room = db.get(Room, keeper.room_id)
+        if room is None or room.status != "cleaning":
+            keeper.room_id = None
+    pending = list(db.scalars(
+        select(Room).where(Room.status == "cleaning", Room.ticks_left.is_(None))
+    ).all())
+    for room in pending:
+        _stamp_clean(db, room, "")
+    for room in db.scalars(select(Room).where(Room.status == "cleaning", Room.linen_stage.is_(None))).all():
+        _start_linen(db, room)
+    aides = list(db.scalars(select(LinenAide).order_by(LinenAide.id)).all())
+    for aide in aides:
+        if not aide.room_id:
+            continue
+        room = db.get(Room, aide.room_id)
+        if room is None or room.status != "cleaning" or room.linen_stage not in LINEN_ACTIVE:
+            aide.room_id = None
+    _assign_housekeepers(db)
+    _assign_linen(db)
+
+
+def _advance_cleaning(db: Session):
+    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+    finished = []
+    for keeper in keepers:
+        if not keeper.room_id:
+            continue
+        room = db.get(Room, keeper.room_id)
+        if room is None or room.status != "cleaning":
+            keeper.room_id = None
+            continue
+        room.ticks_left = (room.ticks_left or 1) - 1
+        if room.ticks_left <= 0:
+            opened = _finish_clean(db, room, keeper)
+            if opened:
+                finished.append(opened)
+    if not finished:
         return None
-    room = random.choice(rooms)
+    return ", ".join(finished)
+
+
+def _finish_clean(db: Session, room: Room, keeper: Housekeeper):
+    keeper.room_id = None
+    room.ticks_left = 0
+    return _try_open(db, room, keeper.name)
+
+
+def _advance_linen(db: Session):
+    aides = list(db.scalars(select(LinenAide).order_by(LinenAide.id)).all())
+    delivered = []
+    for aide in aides:
+        if not aide.room_id:
+            continue
+        room = db.get(Room, aide.room_id)
+        if room is None or room.status != "cleaning" or room.linen_stage not in LINEN_ACTIVE:
+            aide.room_id = None
+            continue
+        room.linen_ticks = (room.linen_ticks or 1) - 1
+        if room.linen_ticks > 0:
+            continue
+        nxt = LINEN_NEXT.get(room.linen_stage)
+        if nxt:
+            room.linen_stage = nxt
+            room.linen_ticks = LINEN_STAGE_TICKS[nxt]
+            continue
+        room.linen_stage = "ready"
+        room.linen_ticks = 0
+        aide.room_id = None
+        _log(db, "Linen", f"{room.id} clean linen delivered", room.id, "clean")
+        opened = _try_open(db, room, aide.name)
+        delivered.append(opened or f"linen {room.id}")
+    if not delivered:
+        return None
+    return ", ".join(delivered)
+
+
+def _assign_linen(db: Session):
+    db.flush()
+    aides = list(db.scalars(select(LinenAide).order_by(LinenAide.id)).all())
+    busy = {aide.room_id for aide in aides if aide.room_id}
+    waiting = []
+    for room in db.scalars(select(Room).where(Room.status == "cleaning")).all():
+        if room.linen_stage not in LINEN_ACTIVE or room.id in busy:
+            continue
+        waiting.append(room)
+    waiting.sort(key=lambda room: (-(room.clean_priority or 0), room.queued_tick or 0, room.id))
+    free = [aide for aide in aides if not aide.room_id]
+    for aide, room in zip(free, waiting):
+        aide.room_id = room.id
+
+
+def _try_open(db: Session, room: Room, keeper_name: str | None = None):
+    if room.status != "cleaning" or (room.ticks_left or 0) > 0 or room.linen_stage != "ready":
+        return None
+    clean_type = room.clean_type or "standard"
+    who = keeper_name or "Housekeeping"
+    _release_linen(db, room)
     room.status = "available"
-    _log(db, "Housekeeping", f"{room.id} is open", room.id, "clean")
+    _clear_clean(room)
+    _log(db, "Housekeeping", f"{room.id} is open · {who} · {clean_type}", room.id, "clean")
     return f"clean {room.id}"
+
+
+def _release_linen(db: Session, room: Room):
+    for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
+        aide.room_id = None
+
+
+def _start_linen(db: Session, room: Room):
+    state = db.get(HospitalState, 1)
+    room.linen_stage = "pickup"
+    room.linen_ticks = LINEN_STAGE_TICKS["pickup"]
+    if room.queued_tick is None:
+        room.queued_tick = state.tick_count if state is not None else 0
+
+
+def _assign_housekeepers(db: Session):
+    db.flush()
+    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+    busy = {keeper.room_id for keeper in keepers if keeper.room_id}
+    waiting = []
+    for room in db.scalars(select(Room).where(Room.status == "cleaning")).all():
+        if room.id in busy or (room.ticks_left or 0) <= 0:
+            continue
+        room.clean_priority = 1 if _in_demand(db, room) else 0
+        waiting.append(room)
+    waiting.sort(key=lambda room: (-(room.clean_priority or 0), room.queued_tick or 0, room.id))
+    free = [keeper for keeper in keepers if not keeper.room_id]
+    for keeper, room in zip(free, waiting):
+        keeper.room_id = room.id
+
+
+def _vacate(db: Session, room: Room, clinical_text: str):
+    room.status = "cleaning"
+    db.flush()
+    _stamp_clean(db, room, clinical_text)
+
+
+def _stamp_clean(db: Session, room: Room, clinical_text: str):
+    state = db.get(HospitalState, 1)
+    isolation = _is_isolation(clinical_text)
+    demand = _in_demand(db, room)
+    if isolation:
+        clean_type = "terminal"
+    elif demand:
+        clean_type = "stat"
+    else:
+        clean_type = "standard"
+    room.clean_type = clean_type
+    room.clean_priority = 1 if demand else 0
+    room.ticks_left = CLEAN_TICKS[clean_type]
+    room.queued_tick = state.tick_count if state is not None else 0
+    _start_linen(db, room)
+
+
+def _is_isolation(clinical_text: str) -> bool:
+    text = (clinical_text or "").lower()
+    return any(marker in text for marker in ISOLATION_MARKERS)
+
+
+def _clinical_text(patient: Patient) -> str:
+    return f"{patient.diagnosis or ''} {patient.chief_complaint or ''}"
+
+
+def _in_demand(db: Session, room: Room) -> bool:
+    return not _class_beds(db, room)
+
+
+def _class_beds(db: Session, room: Room):
+    if room.kind == "or":
+        return _beds(db, kind="or")
+    if room.floor_id == "F1" and room.id.startswith("ED"):
+        return _beds(db, floor_id="F1", prefix="ED")
+    if room.floor_id == "F1" and room.id.startswith("FAST"):
+        return _beds(db, floor_id="F1", prefix="FAST")
+    if room.floor_id == "F1" and room.id.startswith("OBS"):
+        return _beds(db, floor_id="F1", prefix="OBS")
+    if room.floor_id == "F3" and room.id.startswith("ER"):
+        return _beds(db, floor_id="F3", prefix="ER")
+    if room.dept == "icu":
+        return _beds(db, floor_id=room.floor_id, dept="icu")
+    if room.floor_id == "F3" and room.id.startswith("MS"):
+        return _beds(db, floor_id="F3", dept="med", prefix="MS")
+    if room.floor_id == "F2" and room.dept == "med":
+        return _beds(db, floor_id="F2", dept="med")
+    if room.dept == "surgward":
+        return _beds(db, floor_id=room.floor_id, dept="surgward")
+    return _beds(db, floor_id=room.floor_id, dept=room.dept, kind=room.kind or "bed")
+
+
+def _clear_clean(room: Room):
+    room.clean_type = None
+    room.clean_priority = None
+    room.ticks_left = None
+    room.queued_tick = None
+    room.linen_stage = None
+    room.linen_ticks = None
 
 
 def _people(db: Session, floor_id=None, dept=None, prefix=None, acuity=None, stable=False, needs_or=None, kind="bed"):
@@ -293,6 +502,7 @@ def _beds(db: Session, floor_id=None, dept=None, prefix=None, kind="bed"):
 
 def _move(db: Session, patient: Patient, dest: Room, message: str):
     origin = patient.room
+    clinical = _clinical_text(patient)
     origin.status = "cleaning"
     patient.room = dest
     team = _team_for(dest)
@@ -301,6 +511,9 @@ def _move(db: Session, patient: Patient, dest: Room, message: str):
         dest.status = "warning"
     else:
         dest.status = patient.acuity if patient.acuity in OCCUPIED else "normal"
+    _clear_clean(dest)
+    db.flush()
+    _stamp_clean(db, origin, clinical)
     _log(db, patient.name, message, dest.id, "move")
     return message
 
@@ -309,9 +522,10 @@ def _transfer(db: Session, patient: Patient, reason: str):
     destination = DESTINATIONS[reason]
     name = patient.name
     room = patient.room
-    room.status = "cleaning"
+    clinical = _clinical_text(patient)
     db.delete(patient)
     db.add(Transfer(patient_name=name, destination=destination, reason=reason))
+    _vacate(db, room, clinical)
     label = "ICU full" if reason == "icu_full" else "both ORs busy"
     _log(db, name, f"{name} sent to {destination} — {label}", room.id, "transfer")
     return f"transfer {name} {reason}"

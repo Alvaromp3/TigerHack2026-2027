@@ -17,6 +17,12 @@ class Room(Base):
     dept: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(16))
     surge: Mapped[bool] = mapped_column(Boolean, default=False)
+    clean_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    clean_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ticks_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    queued_tick: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    linen_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    linen_ticks: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     patient: Mapped["Patient | None"] = relationship(back_populates="room", uselist=False)
 
@@ -68,6 +74,22 @@ class Death(Base):
     diagnosis: Mapped[str | None] = mapped_column(String(160), nullable=True)
     room_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Housekeeper(Base):
+    __tablename__ = "housekeepers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    room_id: Mapped[str | None] = mapped_column(ForeignKey("rooms.id"), nullable=True)
+
+
+class LinenAide(Base):
+    __tablename__ = "linen_aides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    room_id: Mapped[str | None] = mapped_column(ForeignKey("rooms.id"), nullable=True)
 
 
 class Staff(Base):

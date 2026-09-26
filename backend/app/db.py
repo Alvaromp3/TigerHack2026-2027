@@ -26,6 +26,12 @@ def init_db():
         conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS chief_complaint VARCHAR(160)"))
         conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS diagnosis VARCHAR(160)"))
         conn.execute(text("ALTER TABLE flow_events ADD COLUMN IF NOT EXISTS kind VARCHAR(16) DEFAULT 'move'"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS clean_type VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS clean_priority INTEGER"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS ticks_left INTEGER"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS queued_tick INTEGER"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_stage VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_ticks INTEGER"))
     with SessionLocal() as db:
         seed_if_empty(db)
         pending = db.scalars(select_missing_cases()).all()
@@ -35,6 +41,11 @@ def init_db():
             patient.chief_complaint = case["chief_complaint"]
             patient.diagnosis = case["diagnosis"]
         seed_staff_if_empty(db)
+        seed_housekeepers_if_empty(db)
+        seed_linen_aides_if_empty(db)
+        from app.sim import ensure_cleaning_queue
+
+        ensure_cleaning_queue(db)
         db.commit()
 
 
@@ -73,6 +84,30 @@ def seed_staff_if_empty(db):
             on_duty=on_duty,
             extension=extension,
         ))
+
+
+def seed_housekeepers_if_empty(db):
+    from sqlalchemy import func, select
+
+    from app.models import Housekeeper
+
+    existing = db.scalar(select(func.count()).select_from(Housekeeper))
+    if existing:
+        return
+    for name in ("Ana Ruiz", "Ben Cole", "Chris Adey"):
+        db.add(Housekeeper(name=name, room_id=None))
+
+
+def seed_linen_aides_if_empty(db):
+    from sqlalchemy import func, select
+
+    from app.models import LinenAide
+
+    existing = db.scalar(select(func.count()).select_from(LinenAide))
+    if existing:
+        return
+    for name in ("Dana Ibarra", "Eli March"):
+        db.add(LinenAide(name=name, room_id=None))
 
 
 def select_missing_cases():

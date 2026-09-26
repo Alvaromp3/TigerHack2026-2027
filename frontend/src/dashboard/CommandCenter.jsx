@@ -5,6 +5,7 @@ import FloorPlan from "./FloorPlan";
 import Capacity from "./Capacity";
 import Overview from "./Overview";
 import PatientFlow from "./PatientFlow";
+import TurnoverDesk from "./TurnoverDesk";
 import {
   BUILDING,
   FRAME,
@@ -65,7 +66,7 @@ const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
   flow: "Every admit, floor move, OR case, discharge, and diversion.",
-  turnover: "Purple beds are in cleaning. They are not free until housekeeping marks them ready.",
+  turnover: "Beds stay closed until housekeeping finishes and clean linen arrives from the basement.",
   staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
   reports: "Reports stay off this demo. The live plate is the operational view.",
   settings: "Settings stay off this demo. Floor maps and the elevator are local.",
@@ -312,6 +313,49 @@ function historyFor(room, movements = []) {
   return [{ time: "—", text: "No clinical events on this room.", tag: "Floor" }];
 }
 
+const CLEAN_LABEL = { standard: "Standard", terminal: "Terminal", stat: "STAT" };
+const LINEN_LABEL = {
+  pickup: "Soiled pickup",
+  wash: "Wash",
+  deliver: "Clean delivery",
+  ready: "Sheets here",
+};
+
+function cleanLabel(type) {
+  return CLEAN_LABEL[type] || "Standard";
+}
+
+function ticksLabel(ticks) {
+  if (ticks === 0) return "Done";
+  if (ticks == null) return "—";
+  const seconds = ticks * 9;
+  if (seconds >= 60) return `${ticks} ticks · ~${Math.round(seconds / 60)} min`;
+  return `${ticks} ticks · ~${seconds}s`;
+}
+
+function cleanQueue(hospital) {
+  return hospital
+    .flatMap((floor) => floor.rooms)
+    .filter((room) => room.status === "cleaning" && !room.housekeeper && room.ticksLeft !== 0)
+    .sort((a, b) => {
+      const priority = (b.cleanPriority || 0) - (a.cleanPriority || 0);
+      if (priority) return priority;
+      const queued = (a.queuedTick || 0) - (b.queuedTick || 0);
+      if (queued) return queued;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+function keeperLabel(room, queuePlace) {
+  if (room.housekeeper) return room.housekeeper;
+  if (room.ticksLeft === 0) return "Clean done";
+  return queuePlace ? `Queued #${queuePlace}` : "Queued";
+}
+
+function linenLabel(stage) {
+  return LINEN_LABEL[stage] || "—";
+}
+
 function Meta({ label, children }) {
   return (
     <div className="meta-row">
@@ -346,6 +390,8 @@ export default function CommandCenter() {
   const [surgeOn, setSurgeOn] = useState(false);
   const [transfers, setTransfers] = useState([]);
   const [roster, setRoster] = useState([]);
+  const [housekeepers, setHousekeepers] = useState([]);
+  const [linenAides, setLinenAides] = useState([]);
   const [movements, setMovements] = useState([]);
   const [flowLive, setFlowLive] = useState(false);
   const [flowSyncedAt, setFlowSyncedAt] = useState(null);
@@ -374,6 +420,12 @@ export default function CommandCenter() {
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
   const resolvedIncidents = useMemo(() => incidents.filter((item) => item.status === "resolved").slice(0, 3), [incidents]);
+  const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
+  const queuePlace = useMemo(() => {
+    const places = new Map();
+    waitingClean.forEach((room, index) => places.set(room.id, index + 1));
+    return places;
+  }, [waitingClean]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -397,6 +449,8 @@ export default function CommandCenter() {
           if (stop) return;
           setHospital((current) => applyCensus(current, census.rooms));
           setSurgeOn(Boolean(census.surge));
+          setHousekeepers(census.housekeepers || []);
+          setLinenAides(census.linen_aides || []);
         }
         if (transferRes.ok) {
           const body = await transferRes.json();
@@ -520,11 +574,12 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    const onBoard = nav === "overview" || nav === "capacity" || nav === "flow";
-    const stayingBoard = id === "overview" || id === "capacity" || id === "flow";
+    const boards = ["overview", "capacity", "flow", "turnover", "incidents"];
+    const onBoard = boards.includes(nav);
+    const stayingBoard = boards.includes(id);
     if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
     setNav(id);
-    if (id === "incidents" || id === "flow" || id === "overview" || id === "capacity") {
+    if (id === "incidents" || stayingBoard) {
       setNote(null);
       return;
     }
@@ -1002,7 +1057,20 @@ export default function CommandCenter() {
               </div>
             </div>
           )}
-          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && (
+          {nav === "turnover" && (
+            <TurnoverDesk
+              hospital={hospital}
+              housekeepers={housekeepers}
+              linenAides={linenAides}
+              movements={movements}
+              onOpenRoom={(floorId, roomId) => {
+                const level = hospital.find((item) => item.id === floorId);
+                const room = level?.rooms.find((item) => item.id === roomId);
+                if (level && room) openHit({ floor: level, room });
+              }}
+            />
+          )}
+          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "turnover" && (
           <div
             ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
@@ -1132,6 +1200,7 @@ export default function CommandCenter() {
                     occPct={occPct}
                     deptBeds={deptBeds}
                     movements={movements}
+                    queuePlace={queuePlace.get(selected.id) || null}
                     onClose={() => setSelectedId(null)}
                   />
                 )}
@@ -1148,6 +1217,15 @@ export default function CommandCenter() {
                 <small>
                   {hover.room.deptLabel} · {floor.name}
                 </small>
+                {hover.room.status === "cleaning" && (
+                  <small>
+                    {cleanLabel(hover.room.cleanType)}
+                    {" · "}
+                    {keeperLabel(hover.room, queuePlace.get(hover.room.id))}
+                    {" · "}
+                    {linenLabel(hover.room.linenStage)}
+                  </small>
+                )}
               </div>
             )}
           </div>
@@ -1158,7 +1236,7 @@ export default function CommandCenter() {
   );
 }
 
-function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], onClose }) {
+function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], queuePlace = null, onClose }) {
   const critical = deptBeds.filter((item) => item.status === "critical").length;
   const available = deptBeds.filter((item) => item.status === "available").length;
   const warning = deptBeds.filter((item) => item.status === "warning").length;
@@ -1230,6 +1308,15 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], o
           <Meta label="Surge ready">{room.surge ? "Yes — holds open for MCI" : "Standard"}</Meta>
           {room.census && (
             <Meta label="Bed status">{STATUS[room.status]?.label || "—"}</Meta>
+          )}
+          {room.status === "cleaning" && (
+            <>
+              <Meta label="Clean type">{cleanLabel(room.cleanType)}</Meta>
+              <Meta label="Housekeeper">{keeperLabel(room, queuePlace)}</Meta>
+              <Meta label="Time left">{ticksLabel(room.ticksLeft)}</Meta>
+              <Meta label="Linen">{room.linenAide ? `${room.linenAide} · ${linenLabel(room.linenStage)}` : linenLabel(room.linenStage)}</Meta>
+              <Meta label="Linen time">{room.linenStage === "ready" ? "Here" : ticksLabel(room.linenTicks)}</Meta>
+            </>
           )}
 
           {room.census && deptBeds.length > 0 && (
@@ -1338,9 +1425,11 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], o
             <div className="detail-empty">
               <p className="kicker">No patient assigned</p>
               <p className="detail-copy">
-                {room.census
-                  ? "This bed is open for assignment. Declare surge or wait for the next admit from triage."
-                  : "This space is not an inpatient bed — use it for support workflow only."}
+                {room.status === "cleaning"
+                  ? "This bed is in turnover. It stays closed until housekeeping finishes and clean linen arrives."
+                  : room.census
+                    ? "This bed is open for assignment. Declare surge or wait for the next admit from triage."
+                    : "This space is not an inpatient bed — use it for support workflow only."}
               </p>
             </div>
           )}

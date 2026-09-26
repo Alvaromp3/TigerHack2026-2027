@@ -3,13 +3,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import FlowEvent, HospitalState, Room, Staff, Transfer
+from app.models import FlowEvent, HospitalState, Housekeeper, LinenAide, Room, Staff, Transfer
 from app.sim import declare_surge
 
 router = APIRouter()
 
 
-def _room_payload(room: Room):
+def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | None = None):
     patient = room.patient
     return {
         "id": room.id,
@@ -26,18 +26,51 @@ def _room_payload(room: Room):
         "age": patient.age if patient else None,
         "chief_complaint": patient.chief_complaint if patient else None,
         "diagnosis": patient.diagnosis if patient else None,
+        "clean_type": room.clean_type,
+        "clean_priority": room.clean_priority,
+        "ticks_left": room.ticks_left,
+        "queued_tick": room.queued_tick,
+        "housekeeper": housekeeper,
+        "linen_stage": room.linen_stage,
+        "linen_ticks": room.linen_ticks,
+        "linen_aide": linen_aide,
     }
+
+
+def _keeper_names(db: Session):
+    rows = db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all()
+    return rows, {row.room_id: row.name for row in rows if row.room_id}
+
+
+def _aide_names(db: Session):
+    rows = db.scalars(select(LinenAide).order_by(LinenAide.id)).all()
+    return rows, {row.room_id: row.name for row in rows if row.room_id}
 
 
 def _rooms(db: Session):
     rows = db.scalars(select(Room).options(selectinload(Room.patient)).order_by(Room.id)).all()
-    return [_room_payload(room) for room in rows]
+    _, by_keeper = _keeper_names(db)
+    _, by_aide = _aide_names(db)
+    return [_room_payload(room, by_keeper.get(room.id), by_aide.get(room.id)) for room in rows]
 
 
 @router.get("/census")
 def census(db: Session = Depends(get_db)):
     state = db.get(HospitalState, 1)
-    return {"surge": bool(state and state.surge), "rooms": _rooms(db)}
+    keepers, _ = _keeper_names(db)
+    aides, _ = _aide_names(db)
+    return {
+        "surge": bool(state and state.surge),
+        "rooms": _rooms(db),
+        "housekeepers": [
+            {"id": keeper.id, "name": keeper.name, "room_id": keeper.room_id}
+            for keeper in keepers
+        ],
+        "linen_aides": [
+            {"id": aide.id, "name": aide.name, "room_id": aide.room_id}
+            for aide in aides
+        ],
+    }
 
 
 @router.get("/ors")

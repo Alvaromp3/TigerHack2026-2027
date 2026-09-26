@@ -536,6 +536,14 @@ export function applyCensus(hospital, rooms) {
         age: occupied ? live.age ?? null : null,
         chiefComplaint: occupied ? live.chief_complaint || null : null,
         diagnosis: occupied ? live.diagnosis || null : null,
+        cleanType: live.status === "cleaning" ? live.clean_type || null : null,
+        cleanPriority: live.status === "cleaning" ? live.clean_priority ?? null : null,
+        ticksLeft: live.status === "cleaning" ? live.ticks_left ?? null : null,
+        queuedTick: live.status === "cleaning" ? live.queued_tick ?? null : null,
+        housekeeper: live.status === "cleaning" ? live.housekeeper || null : null,
+        linenStage: live.status === "cleaning" ? live.linen_stage || null : null,
+        linenTicks: live.status === "cleaning" ? live.linen_ticks ?? null : null,
+        linenAide: live.status === "cleaning" ? live.linen_aide || null : null,
       };
     }),
   }));
