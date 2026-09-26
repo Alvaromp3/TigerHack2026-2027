@@ -41,24 +41,149 @@ function toneClass(share) {
   return "";
 }
 
-function houseState(share, available, surgeOn) {
-  if (surgeOn) return { word: "Surge", tone: "is-surge" };
-  if (available === 0 || share >= 85) return { word: "Divert", tone: "is-divert" };
-  if (share >= 70) return { word: "Watch", tone: "is-watch" };
-  return { word: "Open", tone: "is-open" };
+function formatTurnoverTime(roomCount, minutesPerRoom = 15) {
+  const totalMins = roomCount * minutesPerRoom;
+  if (totalMins === 0) return "0m";
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours === 0) return `~${mins} min`;
+  if (mins === 0) return `~${hours} hr`;
+  return `~${hours}h ${mins}m est.`;
 }
 
-function houseNote({ available, total, critical, cleaning, surgeOn, surgeOpen }) {
+function DonutGauge({ share, available }) {
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (Math.min(share, 100) / 100) * circumference;
+
+  let strokeColor = "#10b981"; // Nominal green
+  if (share >= 85) strokeColor = "#ef4444"; // Red saturation
+  else if (share >= 70) strokeColor = "#d97706"; // Amber watch
+
+  return (
+    <div className="donut-wrap">
+      <svg className="donut-svg" viewBox="0 0 100 100" width="105" height="105">
+        <circle
+          className="donut-bg"
+          cx="50"
+          cy="50"
+          r={radius}
+          strokeWidth="8"
+        />
+        <circle
+          className="donut-fill"
+          cx="50"
+          cy="50"
+          r={radius}
+          strokeWidth="8"
+          stroke={strokeColor}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          transform="rotate(-90 50 50)"
+        />
+      </svg>
+      <div className="donut-inner">
+        <strong>{available}</strong>
+        <span>OPEN</span>
+      </div>
+    </div>
+  );
+}
+
+function evaluateDirective(model, surgeOn) {
   if (surgeOn) {
-    if (surgeOpen === 0) return "Emergency and ICU have no open beds left for incoming patients.";
-    const beds = surgeOpen === 1 ? "bed is" : "beds are";
-    return `${surgeOpen} surge ${beds} still open in Emergency and ICU.`;
+    return {
+      tone: "is-surge",
+      word: "Surge",
+      badge: "SURGE ACTIVE",
+      message: "Emergency surge operations active.",
+      directive: `Prioritize intake; ${model.surgeOpen} surge beds ready in critical zones.`
+    };
   }
-  if (available === 0) return "No beds are open.";
-  const sentence = [`${available} of ${total} beds are open.`];
-  if (critical > 0) sentence.push(`${critical} ${critical === 1 ? "is" : "are"} critical.`);
-  if (cleaning > 0) sentence.push(`${cleaning} ${cleaning === 1 ? "is" : "are"} still in cleaning.`);
-  return sentence.join(" ");
+
+  const ed = model.units.find((u) => u.id === "ed");
+  const icu = model.units.find((u) => u.id === "icu");
+  const or = model.units.find((u) => u.id === "or");
+
+  // Priority 1: Emergency Department bottleneck
+  if (ed && (pct(ed.occupied, ed.total) >= 80 || ed.available <= 3)) {
+    const edShare = pct(ed.occupied, ed.total);
+    const isCritical = edShare >= 90 || ed.available <= 1;
+    return {
+      tone: isCritical ? "is-divert" : "is-watch",
+      word: isCritical ? "Divert" : "Watch",
+      badge: "ED CONSTRAINED",
+      message: `Emergency at ${edShare}% capacity (${ed.available} beds open).`,
+      directive: "Reroute non-emergent walk-ins to urgent care; initiate fast-track triage."
+    };
+  }
+
+  // Priority 2: ICU saturation
+  if (icu && (pct(icu.occupied, icu.total) >= 80 || icu.available <= 2)) {
+    const icuShare = pct(icu.occupied, icu.total);
+    const isCritical = icuShare >= 90 || icu.available <= 1;
+    return {
+      tone: isCritical ? "is-divert" : "is-watch",
+      word: isCritical ? "Divert" : "Watch",
+      badge: "ICU CONSTRAINED",
+      message: `Intensive Care at ${icuShare}% capacity (${icu.available} beds open).`,
+      directive: "Review step-down candidates for general wards; hold elective surgical intake."
+    };
+  }
+
+  // Priority 3: OR backlog
+  if (or && pct(or.occupied, or.total) >= 85) {
+    return {
+      tone: "is-watch",
+      word: "Watch",
+      badge: "OR CONSTRAINED",
+      message: `Surgical suites at ${pct(or.occupied, or.total)}% utilization.`,
+      directive: "Expedite post-anesthesia transfers to open surgical recovery beds."
+    };
+  }
+
+  // Priority 4: Turnover / Housekeeping delays
+  if (model.house.cleaning >= 8) {
+    return {
+      tone: "is-watch",
+      word: "Watch",
+      badge: "TURNOVER DELAY",
+      message: `${model.house.cleaning} pending bed cleanings delaying intake.`,
+      directive: "Reassign environmental services priority to Floor 1 trauma suites."
+    };
+  }
+
+  // Priority 5: Hospital-wide census thresholds
+  const overallShare = pct(model.house.occupied, model.house.total);
+  if (overallShare >= 85) {
+    return {
+      tone: "is-divert",
+      word: "Divert",
+      badge: "HOSPITAL SATURATION",
+      message: `Total facility census reached ${overallShare}%.`,
+      directive: "Enact early-discharge triage; alert EMS dispatch of pending divert."
+    };
+  }
+
+  if (overallShare >= 70) {
+    return {
+      tone: "is-watch",
+      word: "Watch",
+      badge: "INPATIENT DEFICIT",
+      message: `Hospital-wide census at ${overallShare}%.`,
+      directive: "Accelerate step-down discharges and monitor bed availability across floors."
+    };
+  }
+
+  // Default: Optimal / Nominal
+  return {
+    tone: "is-open",
+    word: "Nominal",
+    badge: "UNITS CLEAR",
+    message: "All receiving units operating within standard capacity.",
+    directive: "Intake flow open across all services; routine census monitoring."
+  };
 }
 
 function useCount(value, duration = 500) {
@@ -161,37 +286,102 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
 
   const occupiedShare = pct(model.house.occupied, model.house.total);
   const openBeds = useCount(model.house.available);
-  const state = houseState(occupiedShare, model.house.available, surgeOn);
-  const stateNote = houseNote({
-    available: model.house.available,
-    total: model.house.total,
-    critical: model.house.critical,
-    cleaning: model.house.cleaning,
-    surgeOn,
-    surgeOpen: model.surgeOpen,
-  });
+  const directive = evaluateDirective(model, surgeOn);
 
   return (
     <div className="cmd cap">
-      <header className={`cap-lead ${state.tone}`}>
-        <p className="cap-lead-line">
-          <strong>{state.word}</strong>
-          <span>{occupiedShare}% full</span>
-        </p>
-        <p>{stateNote}</p>
+      <header className={`cap-lead ${directive.tone}`}>
+        <div className="cap-lead-status">
+          <span className="status-indicator-dot" />
+          <strong className="cap-lead-word">{directive.word}</strong>
+        </div>
+        <div className="cap-lead-message">
+          <span className="cap-badge">{directive.badge}</span>
+          <span className="cap-message-text">{directive.message}</span>
+          <span className="cap-separator" aria-hidden="true" />
+          <span className="cap-directive-wrap">
+            <span className="cap-directive-label">DIRECTIVE:</span>
+            <span className="cap-directive-text">{directive.directive}</span>
+          </span>
+        </div>
       </header>
 
-      <section className="cap-metrics" aria-label="Hospital capacity">
-        <div className="cap-hero">
-          <span>Open</span>
-          <strong>{openBeds}</strong>
-          <small>of {model.house.total} census beds</small>
+      <section className="cap-metrics-grid" aria-label="Hospital capacity metrics">
+        {/* Zone 1: Census Hero Block */}
+        <div className="cap-metric-card cap-hero-card">
+          <DonutGauge share={occupiedShare} available={openBeds} />
+          <div className="cap-hero-details">
+            <span className="cap-card-kicker">FACILITY CENSUS</span>
+            <div className="cap-hero-stats">
+              <p className="cap-hero-main-stat">
+                <strong>{model.house.occupied}</strong>
+                <span>/ {model.house.total} occupied</span>
+                <b className="cap-hero-pct">({occupiedShare}%)</b>
+              </p>
+              <p className="cap-hero-sub-stat">
+                <span className="surge-indicator-icon">+</span>
+                <strong>{model.surgeOpen}</strong> emergency surge beds available
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="cap-side">
-          <Metric label="Occupancy" value={occupiedShare} suffix="%" />
-          <Metric label="Occupied" value={model.house.occupied} />
-          <Metric label="Critical" value={model.house.critical} alert={model.house.critical > 0} />
-          <Metric label="Cleaning" value={model.house.cleaning} />
+
+        {/* Zone 2: Patient Acuity Card */}
+        <div className={`cap-metric-card cap-acuity-card ${model.house.critical > 0 ? "is-critical-alert" : "is-stable"}`}>
+          <div className="cap-card-header">
+            <span className="cap-card-kicker">CLINICAL ACUITY</span>
+            <span className="cap-card-pill">
+              {model.house.critical > 0 ? "HIGH ATTENTION" : "STABLE"}
+            </span>
+          </div>
+          <div className="cap-card-body">
+            {model.house.critical === 0 ? (
+              <div className="cap-status-callout">
+                <span className="cap-status-icon">✓</span>
+                <div>
+                  <strong>All Patients Stable</strong>
+                  <p>Zero active critical monitoring flags</p>
+                </div>
+              </div>
+            ) : (
+              <div className="cap-status-callout">
+                <strong className="cap-critical-count">{model.house.critical}</strong>
+                <div>
+                  <span className="cap-critical-label">Critical Holds</span>
+                  <p>ICU / Trauma acuity alert active</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Zone 3: Bed Turnover Pipeline Card */}
+        <div className={`cap-metric-card cap-turnover-card ${model.house.cleaning > 0 ? "is-active" : "is-idle"}`}>
+          <div className="cap-card-header">
+            <span className="cap-card-kicker">BED TURNOVER</span>
+            <span className="cap-card-pill">
+              {model.house.cleaning > 0 ? `${model.house.cleaning} QUEUED` : "IDLE"}
+            </span>
+          </div>
+          <div className="cap-card-body">
+            {model.house.cleaning === 0 ? (
+              <div className="cap-status-callout">
+                <span className="cap-status-icon">✓</span>
+                <div>
+                  <strong>Queue Clear</strong>
+                  <p>No turnover delays reported by EVS</p>
+                </div>
+              </div>
+            ) : (
+              <div className="cap-status-callout">
+                <strong className="cap-turnover-count">{model.house.cleaning}</strong>
+                <div>
+                  <span className="cap-turnover-label">Rooms in Cleaning</span>
+                  <p className="cap-turnover-time">{formatTurnoverTime(model.house.cleaning)}</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
