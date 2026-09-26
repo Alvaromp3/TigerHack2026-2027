@@ -22,8 +22,8 @@ function isPatientEvent(item) {
   return flowBucket(item.message) !== "turnover";
 }
 
-function kindFor(message) {
-  const id = flowBucket(message);
+function kindFor(item) {
+  const id = flowBucket(item);
   return PATIENT_BUCKETS.find((bucket) => bucket.id === id) || PATIENT_BUCKETS[1];
 }
 
@@ -53,13 +53,13 @@ export default function PatientFlow({ movements, linked, onOpenMovement }) {
   const counts = useMemo(() => {
     const tally = { all: patients.length };
     for (const bucket of PATIENT_BUCKETS) tally[bucket.id] = 0;
-    for (const item of patients) tally[flowBucket(item.message)] += 1;
+    for (const item of patients) tally[flowBucket(item)] += 1;
     return tally;
   }, [patients]);
 
   const rows = filter === "all"
     ? patients
-    : patients.filter((item) => flowBucket(item.message) === filter);
+    : patients.filter((item) => flowBucket(item) === filter);
 
   return (
     <section className="flow-term" aria-label="Patient flow">
@@ -107,7 +107,7 @@ export default function PatientFlow({ movements, linked, onOpenMovement }) {
         ) : (
           <ol>
             {rows.map((item) => {
-              const kind = kindFor(item.message);
+              const kind = kindFor(item);
               const fresh = item.id === freshId;
               const line = (
                 <>

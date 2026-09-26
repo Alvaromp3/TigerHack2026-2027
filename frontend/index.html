@@ -499,28 +499,63 @@ html.pre .dot{scale:0}
 .s-vid.dark .s-h2{color:#fff}
 
 /* Platform: corridor film running behind the cards */
-.s-platform{overflow:hidden;contain:paint;background:linear-gradient(180deg,#1d2128 0%,#0b1018 100%)}
+.s-platform{overflow:hidden;contain:paint;background:#171914}
 .s-platform>.s-bgvid{transform:translate3d(0,0,0) scale(1.04);transform-origin:50% 50%;
-  will-change:transform;backface-visibility:hidden;-webkit-backface-visibility:hidden;filter:brightness(.55) saturate(.85) contrast(1.1)}
-.s-platform>.s-bgtint{background:linear-gradient(180deg,rgba(9,13,20,.88),rgba(9,13,20,.75) 48%,rgba(9,13,20,.9))}
+  will-change:transform;backface-visibility:hidden;-webkit-backface-visibility:hidden;filter:brightness(.46) saturate(.75) contrast(1.2)}
+.s-platform>.s-bgtint{background:linear-gradient(180deg,rgba(14,18,20,.78),rgba(14,18,20,.68) 42%,rgba(14,18,20,.76))}
 .s-platform .s-head{margin-bottom:clamp(36px,4vw,52px)}
 .s-platform .s-head .s-h2,
 .s-platform .s-head .s-lede,
 .s-platform .s-card h3,
 .s-platform .s-card p,
-.s-platform .s-card .s-ico{color:#f1efe9}
+.s-platform .s-card .s-ico{color:#f2eee7}
 .s-platform .s-head .s-h2,
-.s-platform .s-head .s-lede{color:#f2efe8}
-.s-platform .s-head .s-lede{color:rgba(241,239,233,.8)}
-.s-platform .s-card{position:relative;background:rgba(8,13,20,.8);border:1px solid rgba(202,164,94,.38);border-top:2px solid rgba(202,164,94,.92);
-  border-radius:0;padding:32px 26px 26px;min-height:320px;box-shadow:0 18px 40px -26px rgba(0,0,0,.7);
-  display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;transition:transform .28s ease,box-shadow .28s ease,border-color .28s ease,background .28s ease}
-.s-platform .s-card::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.06),transparent 18%,transparent 100%)}
-.s-platform .s-card:hover{transform:translateY(-8px);box-shadow:0 28px 58px -28px rgba(0,0,0,.8);border-color:rgba(230,190,118,.8);background:rgba(11,17,26,.92)}
-.s-platform .s-card .s-ico{width:52px;height:52px;border-radius:12px;background:rgba(72,104,147,.12);color:#d9b36b;border:1px solid rgba(208,168,96,.2);margin-bottom:24px}
-.s-platform .s-card h3{font-size:clamp(23px,2.2vw,31px);font-weight:420;letter-spacing:-.035em;line-height:1.14;margin-top:0}
-.s-platform .s-card p{font-size:16px;line-height:1.6;color:rgba(239,236,229,.78);margin-top:18px;max-width:32ch}
+.s-platform .s-head .s-lede{color:#f1ebdf}
+.s-platform .s-head .s-lede{color:rgba(241,235,223,.82)}
+.s-platform .s-card{background:rgba(11,13,15,.9);border:1px solid rgba(255,255,255,.09);border-radius:0;padding:32px 24px 26px;box-shadow:none;transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s;min-height:290px;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;position:relative}
+.s-platform .s-card:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.18)}
+.s-platform .s-card .s-ico{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:rgba(255,255,255,.02);color:#d7b871;border:1px solid rgba(215,184,113,.18);margin-bottom:22px}
+.s-platform .s-card h3{font-size:clamp(27px,2.3vw,38px);font-weight:400;letter-spacing:-.04em;line-height:1.03;margin-top:0;max-width:7.2ch}
+.s-platform .s-card p{font-size:15px;line-height:1.65;color:rgba(241,235,223,.78);margin-top:18px;max-width:32ch}
 .s-platform .s-card .s-ico svg{width:22px;height:22px}
+.s-platform .s-card .s-link{margin-top:auto;display:inline-flex;align-items:center;gap:8px;color:#d7b871;font-size:15px;font-weight:500;letter-spacing:-.01em;text-decoration:none}
+.s-platform .s-card .s-link:hover{opacity:.9}
+.s-platform .s-card .s-link .arrow{font-size:20px;line-height:1}
+
+.s-platform-rdmd{position:relative;overflow:hidden;background:linear-gradient(180deg,#f6f7fb 0%,#eef3f9 100%);padding:clamp(72px,9vw,140px) 0;color:var(--s-ink)}
+.s-platform-rdmd .s-wrap{position:relative;z-index:2}
+.s-platform-rdmd .platform-top{display:grid;grid-template-columns:1.3fr .9fr;align-items:flex-end;gap:32px;margin-bottom:28px}
+.s-platform-rdmd .platform-copy-box{padding-left:4px}
+.s-platform-rdmd .s-eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--s-accent)}
+.s-platform-rdmd .s-eyebrow::before{content:"";width:18px;height:1.5px;background:currentColor;border-radius:2px}
+.s-platform-rdmd .platform-title{margin:18px 0 16px;font-size:clamp(52px,6vw,112px);font-weight:400;letter-spacing:-.055em;line-height:.9;color:var(--s-ink);font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif;font-style:normal;max-width:720px}
+.s-platform-rdmd .platform-copy{max-width:760px;margin:0;color:var(--s-muted);font-size:clamp(17px,1.6vw,21px);line-height:1.55;font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif}
+.s-platform-rdmd .platform-visual{position:relative;min-height:260px}
+.s-platform-rdmd .platform-visual::before{content:"";position:absolute;inset:0 0 0 6%;background:radial-gradient(ellipse at center,rgba(47,95,158,.12),rgba(47,95,158,0) 60%);filter:blur(8px);opacity:.8}
+.s-platform-rdmd .platform-visual::after{content:"";position:absolute;right:-6%;bottom:-10%;width:72%;height:116%;border-radius:42% 58% 50% 50% / 44% 38% 62% 56%;background:radial-gradient(circle at 25% 18%,rgba(255,255,255,.8),rgba(205,220,238,.82) 18%,rgba(130,156,190,.85) 52%,rgba(47,95,158,.96) 100%);box-shadow:inset 0 0 90px rgba(255,255,255,.35),0 26px 60px rgba(47,95,158,.18);transform:rotate(12deg);opacity:.9;filter:blur(1.5px)}
+.s-platform-rdmd .platform-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;background:rgba(15,27,49,.04);border:1px solid var(--s-line)}
+.s-platform-rdmd .platform-card{padding:28px 26px 24px;border:1px solid var(--s-line);background:#fff;min-height:272px;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(15,27,49,.03);transition:transform .28s ease, box-shadow .28s ease, border-color .28s ease, background-color .28s ease}
+.s-platform-rdmd .platform-card:hover{transform:translateY(-4px);border-color:rgba(47,95,158,.18);box-shadow:0 18px 36px -24px rgba(15,27,49,.28);background:#fff}
+.s-platform-rdmd .platform-no{display:block;font-size:12px;line-height:1;color:var(--s-accent);font-weight:600;letter-spacing:.18em;text-transform:uppercase;margin-bottom:18px}
+.s-platform-rdmd .platform-card h3{margin:0;font-size:clamp(26px,2.2vw,34px);line-height:1.07;font-weight:400;letter-spacing:-.045em;color:var(--s-ink);font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif;max-width:8ch}
+.s-platform-rdmd .platform-card p{margin:18px 0 0;color:var(--s-muted);font-size:15px;line-height:1.7;max-width:30ch;font-family:Inter,"Helvetica Neue",Helvetica,Arial,sans-serif}
+.s-platform-rdmd .platform-card a{margin-top:auto;display:inline-flex;align-items:center;gap:8px;color:var(--s-accent);text-decoration:none;font-size:15px;letter-spacing:-.02em;padding-top:18px;transition:opacity .2s ease, transform .2s ease}
+.s-platform-rdmd .platform-card a:hover{opacity:.9;transform:translateX(2px)}
+.s-platform-rdmd .platform-card a span{font-size:22px;line-height:1}
+.s-platform-rdmd .platform-card-summary{display:flex;flex-direction:column;justify-content:flex-end;padding-top:26px;background:var(--s-accent-soft)}
+.s-platform-rdmd .platform-card-summary .platform-no{margin-bottom:12px}
+.s-platform-rdmd .platform-card-summary h3{font-size:clamp(23px,1.9vw,30px);max-width:none;letter-spacing:-.04em}
+.s-platform-rdmd .platform-card-summary a{margin-top:20px}
+@media (max-width: 980px){
+  .s-platform-rdmd .platform-top{grid-template-columns:1fr}
+  .s-platform-rdmd .platform-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .s-platform-rdmd .platform-visual{display:none}
+}
+@media (max-width: 640px){
+  .s-platform-rdmd .platform-grid{grid-template-columns:1fr}
+  .s-platform-rdmd .platform-card{min-height:220px}
+  .s-platform-rdmd .platform-title{font-size:clamp(44px,11vw,68px)}
+}
 
 /* cinematic full-bleed banner */
 .s-banner{position:relative;min-height:min(78vh,640px);display:grid;align-items:center;overflow:hidden;isolation:isolate}
@@ -748,46 +783,53 @@ html.pre .dot{scale:0}
   </section>
 
   <!-- Platform -->
-  <section class="s-sec s-vid dark s-platform" id="platform">
-    <video class="s-bgvid" autoplay muted loop playsinline preload="metadata" poster="/videos/corridor.jpg" aria-hidden="true">
-      <source src="/videos/corridor.mp4" type="video/mp4"></video>
-    <div class="s-bgtint"></div>
+  <section class="s-platform-rdmd" id="platform">
     <div class="s-wrap">
-      <header class="s-head rv">
-        <span class="s-eyebrow">The platform</span>
-        <h2 class="s-h2">One command center for the entire surge</h2>
-        <p class="s-lede">From the first ambulance call to the last discharge, SurgeCommand keeps every bed, patient and critical resource in a single live view your whole team can act on.</p>
-      </header>
-      <div class="s-grid">
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-5h6v5"/><path d="M12 8v4M10 10h4"/></svg></div>
+      <div class="platform-top">
+        <div class="platform-copy-box">
+          <span class="s-eyebrow">The platform</span>
+          <h2 class="platform-title">One command center for the entire surge</h2>
+          <p class="platform-copy">From the first ambulance call to the last discharge, SurgeCommand keeps every bed, patient and critical resource in a single live view your whole team can act on.</p>
+        </div>
+        <div class="platform-visual" aria-hidden="true"></div>
+      </div>
+
+      <div class="platform-grid">
+        <article class="platform-card">
+          <span class="platform-no">01</span>
           <h3>Live digital twin</h3>
           <p>Every bed on every floor in 2D and 3D, color-coded by triage level the instant a status changes.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg></div>
+        <article class="platform-card">
+          <span class="platform-no">02</span>
           <h3>AI triage scoring</h3>
           <p>Vitals and field notes are scored into ESI levels in seconds, so the most critical patients always move first.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5.5M12 12l6 5.5"/></svg></div>
+        <article class="platform-card">
+          <span class="platform-no">03</span>
           <h3>Network load balancing</h3>
           <p>When a unit fills up, patients are routed to partner hospitals with open beds and the right specialty.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+        <article class="platform-card">
+          <span class="platform-no">04</span>
           <h3>Paramedic voice intake</h3>
           <p>Crews dictate from the scene. A bed is triaged and reserved before the ambulance reaches the bay.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg></div>
+        <article class="platform-card">
+          <span class="platform-no">05</span>
           <h3>Reverse triage</h3>
           <p>Surface stable patients ready to step down, freeing critical beds exactly when every one counts.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
-        <article class="s-card rv">
-          <div class="s-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/></svg></div>
+        <article class="platform-card">
+          <span class="platform-no">06</span>
           <h3>Live resource tracking</h3>
           <p>Ventilators, blood units and OR suites are tracked in real time, with alerts before anything runs out.</p>
+          <a href="#">Learn more <span>→</span></a>
         </article>
       </div>
     </div>

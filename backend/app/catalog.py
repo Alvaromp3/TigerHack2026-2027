@@ -97,6 +97,11 @@ CASES = [
 ]
 
 
+def random_case():
+    import random
+    return random.choice(CASES)
+
+
 def clinical_case(name: str, acuity: str, index: int = 0):
     """Pick a stable case for a patient name; critical cases bias toward trauma."""
     seed = sum(ord(ch) for ch in name) + index * 17

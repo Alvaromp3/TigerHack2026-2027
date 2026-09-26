@@ -68,6 +68,8 @@ function Stairs({ item }) {
   );
 }
 
+// Elevator component
+
 function Elevator({ item, active }) {
   const cx = item.x + item.w / 2;
   const cy = item.y + item.h / 2;

@@ -377,6 +377,7 @@ export default function CommandCenter() {
   const [elevatorOpen, setElevatorOpen] = useState(false);
   const [surgeOn, setSurgeOn] = useState(false);
   const [transfers, setTransfers] = useState([]);
+  const [roster, setRoster] = useState([]);
   const [movements, setMovements] = useState([]);
   const [flowLive, setFlowLive] = useState(false);
   const [badge, setBadge] = useState(1);
@@ -409,10 +410,11 @@ export default function CommandCenter() {
 
     async function pull() {
       try {
-        const [censusRes, transferRes, flowRes] = await Promise.all([
+        const [censusRes, transferRes, flowRes, staffRes] = await Promise.all([
           fetch(apiUrl("/api/census")),
           fetch(apiUrl("/api/transfers")),
           fetch(apiUrl("/api/flow")),
+          fetch(apiUrl("/api/staff")),
         ]);
         if (stop) return;
         if (censusRes.ok) {
@@ -424,6 +426,10 @@ export default function CommandCenter() {
         if (transferRes.ok) {
           const body = await transferRes.json();
           if (!stop) setTransfers(body.transfers || []);
+        }
+        if (staffRes.ok) {
+          const body = await staffRes.json();
+          if (!stop) setRoster(body.staff || []);
         }
         if (flowRes.ok) {
           const body = await flowRes.json();
@@ -951,12 +957,25 @@ export default function CommandCenter() {
                 {nav !== "incidents" && note && (
                   <div className="incident">
                     <div className="detail-head">
-                      <h2>Live map</h2>
+                      <h2>{nav === "staff" ? "Staff" : "Live map"}</h2>
                       <button type="button" className="icon-btn" onClick={() => { setNote(null); setNav("live"); }} aria-label="Close">
                         ×
                       </button>
                     </div>
-                    <p>{note}</p>
+                    {nav === "staff" ? (
+                      <ul className="activity">
+                        {roster.length === 0 && <li><span>Roster is loading.</span></li>}
+                        {roster.map((person) => (
+                          <li key={person.id}>
+                            <strong>{person.name}</strong>
+                            <span>{person.specialty} · {person.unit.toUpperCase()} · ext {person.extension}</span>
+                            <em>{person.on_duty ? `${person.shift} shift` : "Off duty"}</em>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>{note}</p>
+                    )}
                   </div>
                 )}
 

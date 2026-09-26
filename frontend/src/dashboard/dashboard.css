@@ -2673,6 +2673,7 @@ button.cap-row > span[role="cell"]:not(.cap-floor):not(.cap-occ) {
 .flow-filters button.tone-or { color: var(--flow-or); }
 .flow-filters button.tone-discharge { color: var(--flow-out); }
 .flow-filters button.tone-divert { color: var(--flow-divert); }
+.flow-filters button.tone-death { color: var(--flow-divert); }
 .flow-filters button.is-on { border-bottom-color: currentColor; }
 
 .flow-filters b {
@@ -2715,12 +2716,14 @@ button.flow-line-btn:hover { background: #f7f6f2; }
 .flow-line.tone-or { color: var(--flow-or); }
 .flow-line.tone-discharge { color: var(--flow-out); }
 .flow-line.tone-divert { color: var(--flow-divert); }
+.flow-line.tone-death { color: var(--flow-divert); }
 
 .flow-line.tone-admit.is-fresh .flow-line-btn { background: #eef3fc; }
 .flow-line.tone-move.is-fresh .flow-line-btn { background: #f2f5f8; }
 .flow-line.tone-or.is-fresh .flow-line-btn { background: #fbf4e8; }
 .flow-line.tone-discharge.is-fresh .flow-line-btn { background: #eef6f3; }
 .flow-line.tone-divert.is-fresh .flow-line-btn { background: #fdeeee; }
+.flow-line.tone-death.is-fresh .flow-line-btn { background: #fdeeee; }
 
 .flow-log time,
 .flow-kind {
