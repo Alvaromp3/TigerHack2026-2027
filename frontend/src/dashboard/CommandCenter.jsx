@@ -10,6 +10,7 @@ import {
   findRooms,
   summarize,
 } from "./floors";
+import { roomVisualSrc } from "./roomVisuals";
 import "./dashboard.css";
 import logo from "./logo.png";
 
@@ -660,14 +661,14 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
         </div>
       </div>
 
-      <div className="bed-sketch" aria-hidden="true">
-        <svg viewBox="0 0 160 90">
-          <rect x="8" y="8" width="144" height="74" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
-          <rect x="58" y="28" width="44" height="22" rx="4" fill="#fff" stroke="#94a3b8" />
-          <text x="80" y="70" textAnchor="middle" fontSize="11" fill="#64748b">
-            {room.w.toFixed(2)} × {room.h.toFixed(2)} m
-          </text>
-        </svg>
+      <div className="bed-sketch">
+        <img
+          src={roomVisualSrc(room)}
+          alt={`${room.type} interior`}
+        />
+        <span className="bed-sketch-size">
+          {room.w.toFixed(2)} × {room.h.toFixed(2)} m · {room.area.toFixed(1)} m²
+        </span>
       </div>
 
       <div className="tabs">
