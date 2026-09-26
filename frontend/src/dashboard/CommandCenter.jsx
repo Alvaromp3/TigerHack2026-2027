@@ -39,12 +39,12 @@ const NOTES = {
 
 function Icon({ name }) {
   const common = {
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.8,
+    strokeWidth: 1.75,
     strokeLinecap: "round",
     strokeLinejoin: "round",
     "aria-hidden": true,
@@ -403,18 +403,33 @@ export default function CommandCenter() {
           ))}
 
           <div className="stack-block">
-            <p>Elevator</p>
-            <div className="stack">
-              {hospital.map((level) => (
-                <button
-                  key={level.id}
-                  type="button"
-                  className={level.id === floor.id ? "stack-btn is-on" : "stack-btn"}
-                  onClick={() => goToFloor(level.id)}
-                >
-                  {level.code}
-                </button>
-              ))}
+            <div className="stack-card">
+              <div className="stack-building">
+                <img
+                  className="stack-photo"
+                  src="/main-hospital.jpg"
+                  alt="Main Hospital"
+                />
+                <strong className="stack-building-name">Main Hospital</strong>
+              </div>
+              <div className="stack" role="list" aria-label="Elevator floors">
+                {hospital.map((level) => {
+                  const on = level.id === floor.id;
+                  return (
+                    <button
+                      key={level.id}
+                      type="button"
+                      role="listitem"
+                      className={on ? "stack-btn is-on" : "stack-btn"}
+                      onClick={() => goToFloor(level.id)}
+                      aria-current={on ? "true" : undefined}
+                      aria-label={`${level.name}${on ? ", current floor" : ""}`}
+                    >
+                      {level.code}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </aside>
