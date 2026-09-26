@@ -4,6 +4,7 @@ import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import Capacity from "./Capacity";
 import Overview from "./Overview";
+import PatientFlow from "./PatientFlow";
 import {
   BUILDING,
   FRAME,
@@ -209,13 +210,6 @@ function equipmentFor(room) {
   return rows;
 }
 
-function eventClock(iso) {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
-
 function Stat({ tone, label, value }) {
   return (
     <div className="stat">
@@ -240,6 +234,7 @@ export default function CommandCenter() {
   const [surgeOn, setSurgeOn] = useState(false);
   const [transfers, setTransfers] = useState([]);
   const [movements, setMovements] = useState([]);
+  const [flowLive, setFlowLive] = useState(false);
   const [badge, setBadge] = useState(1);
   const [bellOpen, setBellOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
@@ -275,21 +270,28 @@ export default function CommandCenter() {
           fetch("/api/transfers"),
           fetch("/api/flow"),
         ]);
-        if (!censusRes.ok || stop) return;
-        const census = await censusRes.json();
         if (stop) return;
-        setHospital((current) => applyCensus(current, census.rooms));
-        setSurgeOn(Boolean(census.surge));
+        if (censusRes.ok) {
+          const census = await censusRes.json();
+          if (stop) return;
+          setHospital((current) => applyCensus(current, census.rooms));
+          setSurgeOn(Boolean(census.surge));
+        }
         if (transferRes.ok) {
           const body = await transferRes.json();
           if (!stop) setTransfers(body.transfers || []);
         }
         if (flowRes.ok) {
           const body = await flowRes.json();
-          if (!stop) setMovements(body.events || []);
+          if (!stop) {
+            setMovements(body.events || []);
+            setFlowLive(true);
+          }
+        } else if (!stop) {
+          setFlowLive(false);
         }
       } catch {
-        // The plate keeps its last census if the API is down.
+        if (!stop) setFlowLive(false);
       }
     }
 
@@ -368,8 +370,8 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    const onBoard = nav === "overview" || nav === "capacity";
-    const stayingBoard = id === "overview" || id === "capacity";
+    const onBoard = nav === "overview" || nav === "capacity" || nav === "flow";
+    const stayingBoard = id === "overview" || id === "capacity" || id === "flow";
     if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
     setNav(id);
     if (id === "incidents" || id === "flow" || id === "overview" || id === "capacity") {
@@ -463,7 +465,7 @@ export default function CommandCenter() {
     day: "numeric",
     year: "numeric",
   });
-  const rightOpen = Boolean(selected) || nav === "incidents" || nav === "flow" || Boolean(note);
+  const rightOpen = Boolean(selected) || nav === "incidents" || Boolean(note);
 
   function openMovement(event) {
     if (!event.room_id) return;
@@ -662,7 +664,14 @@ export default function CommandCenter() {
               onDeclareSurge={declareSurge}
             />
           )}
-          {nav !== "overview" && nav !== "capacity" && (
+          {nav === "flow" && (
+            <PatientFlow
+              movements={movements}
+              linked={flowLive}
+              onOpenMovement={openMovement}
+            />
+          )}
+          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && (
           <div
             ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
@@ -795,44 +804,7 @@ export default function CommandCenter() {
                   </div>
                 )}
 
-                {nav === "flow" && (
-                  <div className="incident">
-                    <div className="detail-head">
-                      <div>
-                        <p className="kicker">Live census</p>
-                        <h2>Patient movement</h2>
-                      </div>
-                      <button type="button" className="icon-btn" onClick={() => setNav("live")} aria-label="Close">
-                        ×
-                      </button>
-                    </div>
-                    <p>Admissions, floor changes, operating rooms, discharges, and transfers to other hospitals.</p>
-                    {movements.length === 0 ? (
-                      <p>No movement yet. The census updates every few seconds.</p>
-                    ) : (
-                      <ul className="activity">
-                        {movements.map((item) => (
-                          <li key={item.id}>
-                            {item.room_id ? (
-                              <button type="button" className="flow-row" onClick={() => openMovement(item)}>
-                                <strong>{eventClock(item.created_at)}</strong>
-                                <span>{item.message}</span>
-                                <em>{item.room_id}</em>
-                              </button>
-                            ) : (
-                              <>
-                                <strong>{eventClock(item.created_at)}</strong>
-                                <span>{item.message}</span>
-                              </>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-
-                {nav !== "incidents" && nav !== "flow" && note && (
+                {nav !== "incidents" && note && (
                   <div className="incident">
                     <div className="detail-head">
                       <h2>Live map</h2>
@@ -844,7 +816,7 @@ export default function CommandCenter() {
                   </div>
                 )}
 
-                {nav !== "incidents" && nav !== "flow" && !note && selected && (
+                {nav !== "incidents" && !note && selected && (
                   <RoomCard
                     room={selected}
                     floor={floor}

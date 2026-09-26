@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DEPT } from "./floors";
+import { FLOW_BUCKETS, flowBucket } from "./flowBuckets";
 
 const INK = "#1c1c1a";
 const CRITICAL = "#c1512f";
@@ -8,15 +9,6 @@ const OPEN = "#0f6e56";
 const WATCH = "#c9922f";
 const LINE = "#eceae2";
 const MUTED = "#8a8a86";
-
-const FLOW_BUCKETS = [
-  { id: "admit", label: "Admit" },
-  { id: "move", label: "Transfer" },
-  { id: "or", label: "OR" },
-  { id: "discharge", label: "Discharge" },
-  { id: "divert", label: "Divert" },
-  { id: "turnover", label: "Turnover" },
-];
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -65,16 +57,6 @@ function clock(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
-
-function flowBucket(message) {
-  const text = (message || "").toLowerCase();
-  if (text.includes("admitted")) return "admit";
-  if (text.includes("discharged")) return "discharge";
-  if (text.includes("sent to")) return "divert";
-  if (text.includes("left the or") || / in or-/.test(text)) return "or";
-  if (text.includes(" is open")) return "turnover";
-  return "move";
 }
 
 function barTone(share) {

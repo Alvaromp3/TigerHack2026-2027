@@ -2468,6 +2468,196 @@ button.cap-row > span[role="cell"]:not(.cap-floor):not(.cap-occ) {
   font-style: normal;
 }
 
+.flow-term {
+  --flow-ink: #1c1c1a;
+  --flow-admit: #1d4ed8;
+  --flow-move: #3a5a72;
+  --flow-or: #b86e00;
+  --flow-out: #0f6e56;
+  --flow-divert: #c23b3b;
+  align-self: start;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: #fff;
+  color: var(--flow-ink);
+  border: 1px solid #eceae2;
+  font-family: var(--mono);
+  animation: cmd-in 420ms ease-out;
+}
+
+.flow-prompt {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0;
+  padding: 8px 14px 2px;
+  white-space: pre;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--flow-ink);
+}
+
+.flow-host { font-weight: 600; }
+
+.flow-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8a8a86;
+}
+
+.flow-live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #8a8a86;
+}
+
+.flow-live.is-on { color: var(--flow-out); }
+
+.flow-live.is-on i {
+  background: var(--flow-out);
+  animation: flow-pulse 1.6s ease-in-out infinite;
+}
+
+.flow-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 2px 14px 6px;
+  border-bottom: 1px solid #eceae2;
+}
+
+.flow-filters button {
+  margin: 0;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--flow-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.flow-filters button.tone-admit { color: var(--flow-admit); }
+.flow-filters button.tone-move { color: var(--flow-move); }
+.flow-filters button.tone-or { color: var(--flow-or); }
+.flow-filters button.tone-discharge { color: var(--flow-out); }
+.flow-filters button.tone-divert { color: var(--flow-divert); }
+.flow-filters button.is-on { border-bottom-color: currentColor; }
+
+.flow-filters b {
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.flow-log {
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0;
+}
+
+.flow-log ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flow-line-btn {
+  display: grid;
+  grid-template-columns: 92px 36px minmax(0, 1fr) 12px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 22px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+button.flow-line-btn { cursor: pointer; }
+button.flow-line-btn:hover { background: #f7f6f2; }
+
+.flow-line.tone-admit { color: var(--flow-admit); }
+.flow-line.tone-move { color: var(--flow-move); }
+.flow-line.tone-or { color: var(--flow-or); }
+.flow-line.tone-discharge { color: var(--flow-out); }
+.flow-line.tone-divert { color: var(--flow-divert); }
+
+.flow-line.tone-admit.is-fresh .flow-line-btn { background: #eef3fc; }
+.flow-line.tone-move.is-fresh .flow-line-btn { background: #f2f5f8; }
+.flow-line.tone-or.is-fresh .flow-line-btn { background: #fbf4e8; }
+.flow-line.tone-discharge.is-fresh .flow-line-btn { background: #eef6f3; }
+.flow-line.tone-divert.is-fresh .flow-line-btn { background: #fdeeee; }
+
+.flow-log time,
+.flow-kind {
+  color: inherit;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.flow-line-btn > span:not(.flow-caret) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.flow-caret {
+  width: 8px;
+  height: 15px;
+  background: currentColor;
+  animation: flow-blink 1.05s steps(1) infinite;
+}
+
+.flow-wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 18px;
+  font-size: 13px;
+  color: var(--flow-ink);
+}
+
+.flow-term-foot {
+  display: flex;
+  gap: 22px;
+  padding: 6px 14px;
+  border-top: 1px solid #eceae2;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #8a8a86;
+}
+
+.flow-term-foot .is-linked { color: var(--flow-out); }
+.flow-term-foot .is-stale { color: var(--flow-divert); }
+
+@keyframes flow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes flow-blink {
+  50% { opacity: 0; }
+}
+
 @media (max-width: 900px) {
   .ov-metrics,
   .ov-split,
