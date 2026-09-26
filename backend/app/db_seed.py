@@ -35,5 +35,6 @@ def seed_if_empty(db: Session):
     db.add(FlowEvent(
         patient_name="Census",
         message="Floor plate loaded from the live census",
+        kind="admit",
         room_id=None,
     ))

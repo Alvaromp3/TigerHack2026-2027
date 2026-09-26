@@ -191,7 +191,7 @@ export default function Overview({
     const flow = Object.fromEntries(
       FLOW_BUCKETS.map((bucket) => [
         bucket.id,
-        movements.filter((item) => flowBucket(item.message) === bucket.id).length,
+        movements.filter((item) => flowBucket(item) === bucket.id).length,
       ]),
     );
     const staff = floors.map((floor) => {
