@@ -661,6 +661,21 @@ button, input, select { font: inherit; color: inherit; }
   font-size: 13px;
 }
 .activity em { grid-column: 2; color: var(--muted); font-style: normal; font-size: 12px; }
+.flow-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 48px 1fr;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.flow-row em { grid-column: 2; }
 .equip .ok { color: #15803d; }
 .equip .warn { color: #b45309; }
 

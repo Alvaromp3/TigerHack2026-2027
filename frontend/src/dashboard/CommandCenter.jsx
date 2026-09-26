@@ -6,7 +6,7 @@ import {
   BUILDING,
   FRAME,
   STATUS,
-  applySurge,
+  applyCensus,
   buildHospital,
   findRooms,
   summarize,
@@ -31,7 +31,7 @@ const NAV = [
 const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
-  flow: "Patient flow follows the bed state on the plate: critical, warning, stable, open, cleaning.",
+  flow: "Every admit, floor move, OR case, discharge, and diversion.",
   equipment: "Monitors, vents, and pumps sit on the selected bed. Pick a room to read them.",
   turnover: "Purple beds are in cleaning. They are not free until housekeeping marks them ready.",
   staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
@@ -178,6 +178,13 @@ function equipmentFor(room) {
   return rows;
 }
 
+function eventClock(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 function Stat({ tone, label, value }) {
   return (
     <div className="stat">
@@ -200,6 +207,8 @@ export default function CommandCenter() {
   const [note, setNote] = useState(null);
   const [elevatorOpen, setElevatorOpen] = useState(false);
   const [surgeOn, setSurgeOn] = useState(false);
+  const [transfers, setTransfers] = useState([]);
+  const [movements, setMovements] = useState([]);
   const [badge, setBadge] = useState(1);
   const [bellOpen, setBellOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
@@ -222,6 +231,42 @@ export default function CommandCenter() {
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+
+    async function pull() {
+      try {
+        const [censusRes, transferRes, flowRes] = await Promise.all([
+          fetch("/api/census"),
+          fetch("/api/transfers"),
+          fetch("/api/flow"),
+        ]);
+        if (!censusRes.ok || stop) return;
+        const census = await censusRes.json();
+        if (stop) return;
+        setHospital((current) => applyCensus(current, census.rooms));
+        setSurgeOn(Boolean(census.surge));
+        if (transferRes.ok) {
+          const body = await transferRes.json();
+          if (!stop) setTransfers(body.transfers || []);
+        }
+        if (flowRes.ok) {
+          const body = await flowRes.json();
+          if (!stop) setMovements(body.events || []);
+        }
+      } catch {
+        // The plate keeps its last census if the API is down.
+      }
+    }
+
+    pull();
+    const timer = setInterval(pull, 4000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -256,7 +301,7 @@ export default function CommandCenter() {
     setHover(null);
     setNote(null);
     setFitToken((token) => token + 1);
-    if (nav !== "incidents") setNav("live");
+    if (nav !== "incidents" && nav !== "flow") setNav("live");
   }
 
   function openHit(hit) {
@@ -274,7 +319,7 @@ export default function CommandCenter() {
   function chooseNav(id) {
     setNav(id);
     setElevatorOpen(false);
-    if (id === "incidents") {
+    if (id === "incidents" || id === "flow") {
       setNote(null);
       return;
     }
@@ -285,18 +330,24 @@ export default function CommandCenter() {
     setNote(NOTES[id]);
   }
 
-  function declareSurge() {
+  async function declareSurge() {
     if (surgeOn) return;
-    const { hospital: next, flipped } = applySurge(hospital);
-    setHospital(next);
-    setSurgeOn(true);
-    setBadge(3);
-    setNav("incidents");
-    setToast(
-      flipped
-        ? `${flipped} open beds on F1 and F3 are now held for the train collision.`
-        : "No open surge beds left on F1 or F3.",
-    );
+    try {
+      const res = await fetch("/api/surge", { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setHospital((current) => applyCensus(current, data.rooms));
+      setSurgeOn(true);
+      setBadge(3);
+      setNav("incidents");
+      setToast(
+        data.flipped
+          ? `${data.flipped} open beds on F1 and F3 are now held for the train collision.`
+          : "No open surge beds left on F1 or F3.",
+      );
+    } catch {
+      setToast("Could not reach the census service.");
+    }
   }
 
   zoomRef.current = zoom;
@@ -359,7 +410,18 @@ export default function CommandCenter() {
     day: "numeric",
     year: "numeric",
   });
-  const rightOpen = Boolean(selected) || nav === "incidents" || Boolean(note);
+  const rightOpen = Boolean(selected) || nav === "incidents" || nav === "flow" || Boolean(note);
+
+  function openMovement(event) {
+    if (!event.room_id) return;
+    for (const level of hospital) {
+      const room = level.rooms.find((item) => item.id === event.room_id);
+      if (room) {
+        openHit({ floor: level, room });
+        return;
+      }
+    }
+  }
 
   function placeNavTip(event) {
     const tip = event.currentTarget.querySelector(".nav-tip");
@@ -623,10 +685,58 @@ export default function CommandCenter() {
                         Receiving units updated. Ride the elevator to F1 or F3 to see the beds turn critical.
                       </p>
                     )}
+                    {transfers.length > 0 && (
+                      <ul className="activity">
+                        {transfers.slice(0, 4).map((item) => (
+                          <li key={item.id}>
+                            <strong>{item.destination}</strong>
+                            <span>{item.patient_name}</span>
+                            <em>{item.reason === "icu_full" ? "ICU full" : "ORs full"}</em>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
 
-                {nav !== "incidents" && note && (
+                {nav === "flow" && (
+                  <div className="incident">
+                    <div className="detail-head">
+                      <div>
+                        <p className="kicker">Live census</p>
+                        <h2>Patient movement</h2>
+                      </div>
+                      <button type="button" className="icon-btn" onClick={() => setNav("live")} aria-label="Close">
+                        ×
+                      </button>
+                    </div>
+                    <p>Admissions, floor changes, operating rooms, discharges, and transfers to other hospitals.</p>
+                    {movements.length === 0 ? (
+                      <p>No movement yet. The census updates every few seconds.</p>
+                    ) : (
+                      <ul className="activity">
+                        {movements.map((item) => (
+                          <li key={item.id}>
+                            {item.room_id ? (
+                              <button type="button" className="flow-row" onClick={() => openMovement(item)}>
+                                <strong>{eventClock(item.created_at)}</strong>
+                                <span>{item.message}</span>
+                                <em>{item.room_id}</em>
+                              </button>
+                            ) : (
+                              <>
+                                <strong>{eventClock(item.created_at)}</strong>
+                                <span>{item.message}</span>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {nav !== "incidents" && nav !== "flow" && note && (
                   <div className="incident">
                     <div className="detail-head">
                       <h2>Live map</h2>
@@ -638,7 +748,7 @@ export default function CommandCenter() {
                   </div>
                 )}
 
-                {nav !== "incidents" && !note && selected && (
+                {nav !== "incidents" && nav !== "flow" && !note && selected && (
                   <RoomCard
                     room={selected}
                     floor={floor}
