@@ -6,7 +6,7 @@ import threading
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.catalog import ARRIVALS, DESTINATIONS, OCCUPIED, crew
+from app.catalog import DESTINATIONS, OCCUPIED, crew, fresh_patient_name
 from app.models import FlowEvent, HospitalState, Patient, Room, Transfer
 
 log = logging.getLogger(__name__)
@@ -65,12 +65,15 @@ def declare_surge(db: Session) -> int:
             .order_by(Room.id)
         ).all()
         flipped = 0
+        taken = set(db.scalars(select(Patient.name)).all())
         for room in rooms:
             flipped += 1
             team = "icu" if room.dept == "icu" else "ed"
             physician, nurse = crew(team, 0)
+            name = fresh_patient_name(taken, flipped)
+            taken.add(name)
             db.add(Patient(
-                name=f"MCI arrival {flipped}",
+                name=name,
                 acuity="critical",
                 room_id=room.id,
                 needs_or=False,
@@ -266,11 +269,8 @@ def _team_for(room: Room):
 
 
 def _fresh_name(db: Session, index: int):
-    base = ARRIVALS[index % len(ARRIVALS)]
     taken = set(db.scalars(select(Patient.name)).all())
-    if base not in taken:
-        return base
-    return f"{base} {index + 2}"
+    return fresh_patient_name(taken, index)
 
 
 def _log(db: Session, name: str, message: str, room_id: str | None):

@@ -14,18 +14,47 @@ ED = [
 ]
 OCCUPIED = {"critical", "warning", "normal"}
 
-PATIENTS = [
-    "Sofia Alvarez", "James Whitfield", "Noah Bennett", "Amina Diallo", "Helen Cho",
-    "Mateo Ruiz", "Grace Ibrahim", "Owen Clarke", "Priya Nair", "Samuel Ortiz",
-    "Lila Berg", "Jonah Abebe", "Emma Walsh", "Hugo Ferreira", "Nora Kim",
-    "Eliot March", "Clara Voss", "Andre Blake", "Maya Haddad", "Felix Nguyen",
+_GIVEN = [
+    "Sofia", "James", "Noah", "Amina", "Helen", "Mateo", "Grace", "Owen",
+    "Priya", "Samuel", "Lila", "Jonah", "Emma", "Hugo", "Nora", "Eliot",
+    "Clara", "Andre", "Maya", "Felix", "Camila", "Hassan", "Ruth", "Diego",
+    "Imani", "Lars", "Yara", "Mei", "Paul", "Nina", "Omar", "Leah",
+    "Victor", "Asha", "Elena", "Marcus", "Fatima", "Luis", "Hannah", "Kenji",
+    "Amara", "Theo", "Rosa", "Daniel", "Ines", "Malik", "Chloe", "Ravi",
+]
+_FAMILY = [
+    "Alvarez", "Whitfield", "Bennett", "Diallo", "Cho", "Ruiz", "Ibrahim", "Clarke",
+    "Nair", "Ortiz", "Berg", "Abebe", "Walsh", "Ferreira", "Kim", "March",
+    "Voss", "Blake", "Haddad", "Nguyen", "Brooks", "Petrov", "Okeke", "Tanaka",
+    "Cohen", "Lang", "Reddy", "Santos", "Moreau", "Keller", "Okada", "Diaz",
 ]
 
-ARRIVALS = [
-    "Camila Ortiz", "Hassan Ali", "Ruth Mendel", "Diego Park", "Imani Brooks",
-    "Lars Holm", "Yara Haddad", "Owen Briggs", "Mei Tanaka", "Paul Okeke",
-    "Nina Petrov", "Omar Said", "Leah Cohen", "Victor Lang", "Asha Reddy",
-]
+def _names():
+    """Every given+family pair once, with neighboring patients on different surnames."""
+    pool = []
+    seen = set()
+    span = len(_GIVEN) * len(_FAMILY)
+    for index in range(span):
+        given = _GIVEN[index % len(_GIVEN)]
+        family = _FAMILY[(index * 7) % len(_FAMILY)]
+        full = f"{given} {family}"
+        if full in seen:
+            full = next(f"{given} {last}" for last in _FAMILY if f"{given} {last}" not in seen)
+        seen.add(full)
+        pool.append(full)
+    return pool
+
+
+PATIENTS = _names()
+
+
+def fresh_patient_name(taken: set[str], index: int = 0) -> str:
+    """Next unused full name. Never appends a number."""
+    for step in range(len(PATIENTS)):
+        candidate = PATIENTS[(index + step) % len(PATIENTS)]
+        if candidate not in taken:
+            return candidate
+    raise RuntimeError("patient name pool exhausted")
 
 CREWS = {
     "icu": ("Dr. Leena Patel", ["RN Maya Chen", "RN Chris Novak"]),
@@ -107,7 +136,7 @@ def census_rooms():
         spec["needs_or"] = False
         if spec["status"] not in OCCUPIED:
             continue
-        spec["patient"] = PATIENTS[cursor % len(PATIENTS)]
+        spec["patient"] = PATIENTS[cursor]
         cursor += 1
         spec["physician"], spec["nurse"] = crew(spec["team"], spec["nurse_index"])
         if spec["kind"] == "or":
