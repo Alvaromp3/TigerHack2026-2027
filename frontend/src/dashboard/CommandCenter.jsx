@@ -16,6 +16,7 @@ import {
 } from "./floors";
 import { apiUrl } from "../api/client";
 import { roomVisualSrc } from "./roomVisuals";
+import { flowBucket } from "./flowBuckets";
 import "./dashboard.css";
 import logo from "./logo.png";
 
@@ -300,6 +301,8 @@ export default function CommandCenter() {
   const [roster, setRoster] = useState([]);
   const [movements, setMovements] = useState([]);
   const [flowLive, setFlowLive] = useState(false);
+  const [flowSyncedAt, setFlowSyncedAt] = useState(null);
+  const [flowNotice, setFlowNotice] = useState("");
   const [badge, setBadge] = useState(1);
   const [bellOpen, setBellOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
@@ -309,6 +312,7 @@ export default function CommandCenter() {
   const [fitToken, setFitToken] = useState(0);
   const mapRef = useRef(null);
   const sfxRef = useRef(null);
+  const knownFlow = useRef(null);
   const zoomRef = useRef(1.25);
   const startZoom = useRef(null);
   const [tab, setTab] = useState("overview");
@@ -356,6 +360,7 @@ export default function CommandCenter() {
           if (!stop) {
             setMovements(body.events || []);
             setFlowLive(true);
+            setFlowSyncedAt(Date.now());
           }
         } else if (!stop) {
           setFlowLive(false);
@@ -372,6 +377,30 @@ export default function CommandCenter() {
       clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    const ids = new Set(movements.map((item) => item.id));
+    if (knownFlow.current == null) {
+      knownFlow.current = ids;
+      return;
+    }
+    const arrived = movements.filter((item) => !knownFlow.current.has(item.id));
+    knownFlow.current = ids;
+    if (nav === "flow" || arrived.length === 0) return;
+    const critical = arrived.find((item) => {
+      const bucket = flowBucket(item);
+      return bucket === "death" || bucket === "divert";
+    });
+    if (!critical) return;
+    const code = flowBucket(critical) === "death" ? "DTH" : "DV";
+    setFlowNotice(`${code}  ${critical.patient_name || critical.message}`);
+  }, [movements, nav]);
+
+  useEffect(() => {
+    if (!flowNotice) return undefined;
+    const timer = setTimeout(() => setFlowNotice(""), 8000);
+    return () => clearTimeout(timer);
+  }, [flowNotice]);
 
   useEffect(() => {
     function onKey(event) {
@@ -602,6 +631,19 @@ export default function CommandCenter() {
           )}
         </div>
 
+        {flowNotice && (
+          <button
+            type="button"
+            className="flow-notice"
+            onClick={() => {
+              setFlowNotice("");
+              chooseNav("flow");
+            }}
+          >
+            {flowNotice}
+          </button>
+        )}
+
         <div className="top-tools">
           <div className="bell-wrap">
             <button
@@ -738,6 +780,7 @@ export default function CommandCenter() {
             <PatientFlow
               movements={movements}
               linked={flowLive}
+              syncedAt={flowSyncedAt}
               onOpenMovement={openMovement}
             />
           )}

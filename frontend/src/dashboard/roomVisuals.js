@@ -52,6 +52,7 @@ const BY_TYPE = {
 };
 
 export function roomVisualSrc(room) {
+  if (room?.id === "ADMIN") return "/team-pic.jpg";
   const key = BY_TYPE[room?.type] || "medsurg";
   return `/rooms/${key}.png`;
 }
