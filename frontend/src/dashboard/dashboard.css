@@ -908,11 +908,75 @@ button, input, select { font: inherit; color: inherit; }
   border-radius: 10px;
   background: #fff;
 }
+.incident-row.has-photo {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+.incident-row .incident-row-body {
+  flex: 1;
+  min-width: 0;
+}
+.incident-row .incident-photo {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: #eef2f7;
+}
 .incident-row p {
   margin: 8px 0 0;
   font-size: 13px;
   line-height: 1.45;
   color: var(--ink-soft);
+}
+/* photo field in the report form */
+.incident-photo-field { margin-top: 2px; }
+.incident-photo-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px 10px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.incident-photo-drop:hover { border-color: var(--blue); color: var(--blue); }
+.incident-photo-drop input { display: none; }
+.incident-photo-preview {
+  position: relative;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.incident-photo-preview img {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+}
+.incident-photo-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
 }
 .incident-row-head {
   display: flex;

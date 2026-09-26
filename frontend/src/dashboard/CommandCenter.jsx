@@ -77,10 +77,29 @@ const DEFAULT_INCIDENTS = [
   {
     id: "INC-241",
     roomId: "ED-T1",
-    title: "ER trauma bay blocked for imaging downtime",
+    title: "Patient fall on arrival — bay held for assessment",
     severity: "high",
     status: "open",
     createdAt: "2026-09-26T08:00:00Z",
+    photo: "/faces/face-10-scared.png",
+  },
+  {
+    id: "INC-236",
+    roomId: "ICU-305",
+    title: "Combative patient — restraints and security requested",
+    severity: "critical",
+    status: "open",
+    createdAt: "2026-09-26T07:41:00Z",
+    photo: "/faces/face-01-mad.png",
+  },
+  {
+    id: "INC-228",
+    roomId: "OBS-2",
+    title: "Patient reports chest pain — spill blocking the doorway",
+    severity: "medium",
+    status: "open",
+    createdAt: "2026-09-26T07:12:00Z",
+    photo: "/faces/face-06-sad.png",
   },
   {
     id: "INC-189",
@@ -89,6 +108,7 @@ const DEFAULT_INCIDENTS = [
     severity: "medium",
     status: "resolved",
     createdAt: "2026-09-25T15:22:00Z",
+    photo: "/faces/face-03-happy.png",
   },
 ];
 
@@ -405,6 +425,7 @@ export default function CommandCenter() {
   const [fitToken, setFitToken] = useState(0);
   const [incidentTitle, setIncidentTitle] = useState("");
   const [incidentSeverity, setIncidentSeverity] = useState("high");
+  const [incidentPhoto, setIncidentPhoto] = useState(null);
   const mapRef = useRef(null);
   const sfxRef = useRef(null);
   const knownFlow = useRef(null);
@@ -590,6 +611,17 @@ export default function CommandCenter() {
     setNote(NOTES[id]);
   }
 
+  function onIncidentPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setIncidentPhoto(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setIncidentPhoto(reader.result);
+    reader.readAsDataURL(file);
+  }
+
   function reportIncident() {
     const targetRoomId = selectedId || floor.rooms.find((room) => room.census)?.id || "ED-T1";
     const title = incidentTitle.trim() || `${targetRoomId} needs engineering review`;
@@ -602,6 +634,7 @@ export default function CommandCenter() {
         severity: incidentSeverity,
         status: "open",
         createdAt: new Date().toISOString(),
+        photo: incidentPhoto,
       },
       ...current,
     ]);
@@ -624,6 +657,7 @@ export default function CommandCenter() {
     setSelectedId(targetRoomId);
     setNav("incidents");
     setIncidentTitle("");
+    setIncidentPhoto(null);
     setToast(`${targetRoomId} is now blocked until resolved.`);
   }
 
@@ -987,6 +1021,29 @@ export default function CommandCenter() {
                           <option value="critical">Critical</option>
                         </select>
                       </label>
+                      <label>
+                        <span>Photo</span>
+                        <div className="incident-photo-field">
+                          {incidentPhoto ? (
+                            <div className="incident-photo-preview">
+                              <img src={incidentPhoto} alt="Incident attachment preview" />
+                              <button
+                                type="button"
+                                className="incident-photo-remove"
+                                onClick={() => setIncidentPhoto(null)}
+                                aria-label="Remove photo"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="incident-photo-drop">
+                              <input type="file" accept="image/*" onChange={onIncidentPhoto} />
+                              <span>Add a photo</span>
+                            </label>
+                          )}
+                        </div>
+                      </label>
                       <button type="button" className="surge-btn" onClick={reportIncident}>
                         Report incident
                       </button>
@@ -1021,15 +1078,20 @@ export default function CommandCenter() {
                       ) : (
                         <ul className="incident-list">
                           {openIncidents.map((item) => (
-                            <li key={item.id} className="incident-row">
-                              <div className="incident-row-head">
-                                <strong>{item.roomId}</strong>
-                                <span className={`severity severity-${item.severity}`}>{item.severity}</span>
-                              </div>
-                              <p>{item.title}</p>
-                              <div className="incident-row-meta">
-                                <small>{new Date(item.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</small>
-                                <button type="button" onClick={() => resolveIncident(item.id)}>Resolve</button>
+                            <li key={item.id} className={item.photo ? "incident-row has-photo" : "incident-row"}>
+                              {item.photo && (
+                                <img className="incident-photo" src={item.photo} alt={`${item.roomId} incident`} />
+                              )}
+                              <div className="incident-row-body">
+                                <div className="incident-row-head">
+                                  <strong>{item.roomId}</strong>
+                                  <span className={`severity severity-${item.severity}`}>{item.severity}</span>
+                                </div>
+                                <p>{item.title}</p>
+                                <div className="incident-row-meta">
+                                  <small>{new Date(item.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</small>
+                                  <button type="button" onClick={() => resolveIncident(item.id)}>Resolve</button>
+                                </div>
                               </div>
                             </li>
                           ))}
@@ -1042,12 +1104,17 @@ export default function CommandCenter() {
                       <ul className="incident-list compact">
                         {resolvedIncidents.length === 0 && <li className="detail-copy">No recent closures.</li>}
                         {resolvedIncidents.map((item) => (
-                          <li key={item.id} className="incident-row resolved">
-                            <div className="incident-row-head">
-                              <strong>{item.roomId}</strong>
-                              <span className="severity resolved-tag">Resolved</span>
+                          <li key={item.id} className={item.photo ? "incident-row resolved has-photo" : "incident-row resolved"}>
+                            {item.photo && (
+                              <img className="incident-photo" src={item.photo} alt={`${item.roomId} incident`} />
+                            )}
+                            <div className="incident-row-body">
+                              <div className="incident-row-head">
+                                <strong>{item.roomId}</strong>
+                                <span className="severity resolved-tag">Resolved</span>
+                              </div>
+                              <p>{item.title}</p>
                             </div>
-                            <p>{item.title}</p>
                           </li>
                         ))}
                       </ul>
