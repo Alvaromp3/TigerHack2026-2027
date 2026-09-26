@@ -219,19 +219,31 @@ function codesFor(hospital, match) {
 }
 
 export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor }) {
+  const [viewFloorId, setViewFloorId] = useState("all");
   const model = useMemo(() => {
-    const rooms = hospital.flatMap((floor) => floor.rooms);
-    const house = tally(rooms);
-    const floors = hospital
+    // 1. Get ALL floors for the table sidebar (including B1 and F5)
+    const allFloors = hospital
       .map((floor) => ({
         ...tally(floor.rooms),
         id: floor.id,
         code: floor.code,
         name: floor.name,
       }))
-      .filter((floor) => floor.total > 0)
       .sort((a, b) => floorRank(a.code) - floorRank(b.code));
 
+    // Calculate total hospital stats for the "All Floors" button
+    const allRooms = hospital.flatMap((floor) => floor.rooms);
+    const allHouse = tally(allRooms);
+
+    // 2. Filter the active rooms based on the selected view
+    const activeHospital = viewFloorId === "all" 
+      ? hospital 
+      : hospital.filter(f => f.id === viewFloorId);
+      
+    const rooms = activeHospital.flatMap((floor) => floor.rooms);
+    const house = tally(rooms);
+
+    // 3. Group Departments (now based only on filtered rooms)
     const grouped = new Map();
     for (const room of rooms) {
       if (!room.census || !room.dept) continue;
@@ -249,41 +261,43 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
       .filter((dept) => dept.total > 0)
       .sort((a, b) => pct(b.occupied, b.total) - pct(a.occupied, a.total));
 
+    // 4. Group Units (now based only on filtered rooms)
     const icuRooms = rooms.filter((room) => room.dept === "icu");
     const edRooms = rooms.filter((room) => room.dept === "ed" || room.dept === "trauma");
     const orRooms = rooms.filter((room) => room.kind === "or");
     const surgeBeds = (list) => list.filter((room) => room.census && room.surge && room.status === "available").length;
 
-return {
+    return {
+      allFloors,
+      allHouse,
       house,
-      floors,
       departments,
       units: [
         {
           id: "icu",
           label: "Intensive Care",
-          floors: codesFor(hospital, (room) => room.dept === "icu"),
+          floors: codesFor(activeHospital, (room) => room.dept === "icu"),
           ...tally(icuRooms),
           surge: surgeBeds(icuRooms),
         },
         {
           id: "ed",
           label: "Emergency",
-          floors: codesFor(hospital, (room) => room.dept === "ed" || room.dept === "trauma"),
+          floors: codesFor(activeHospital, (room) => room.dept === "ed" || room.dept === "trauma"),
           ...tally(edRooms),
           surge: surgeBeds(edRooms),
         },
         {
           id: "or",
           label: "Operating rooms",
-          floors: codesFor(hospital, (room) => room.kind === "or"),
+          floors: codesFor(activeHospital, (room) => room.kind === "or"),
           ...tally(orRooms),
           surge: null,
         },
       ],
       surgeOpen: surgeBeds([...icuRooms, ...edRooms]),
     };
-  }, [hospital]);
+  }, [hospital, viewFloorId]);
 
   const occupiedShare = pct(model.house.occupied, model.house.total);
   const openBeds = useCount(model.house.available);
@@ -412,29 +426,63 @@ return {
                 <span role="columnheader">Total</span>
                 <span role="columnheader">Occupancy</span>
               </div>
-              {model.floors.map((floor) => {
+              
+              {/* Permanent 'All Floors' Row */}
+              <button
+                type="button"
+                role="row"
+                className={viewFloorId === "all" ? "cap-row is-on" : "cap-row"}
+                onClick={() => setViewFloorId("all")}
+              >
+                <span className="cap-floor" role="cell">
+                  <em>ALL</em>
+                  Facility View
+                </span>
+                <strong role="cell">{model.allHouse.available}</strong>
+                <span role="cell">{model.allHouse.occupied}</span>
+                <span role="cell" className={model.allHouse.critical > 0 ? "is-alert" : ""}>{model.allHouse.critical}</span>
+                <span role="cell">{model.allHouse.cleaning}</span>
+                <span role="cell">{model.allHouse.total}</span>
+                <span className="cap-occ" role="cell">
+                  <Meter share={pct(model.allHouse.occupied, model.allHouse.total)} />
+                  <b>{pct(model.allHouse.occupied, model.allHouse.total)}%</b>
+                </span>
+              </button>
+
+              {/* Dynamic Floor Rows */}
+              {model.allFloors.map((floor) => {
                 const share = pct(floor.occupied, floor.total);
                 return (
                   <button
                     key={floor.id}
                     type="button"
                     role="row"
-                    className={floor.id === activeFloorId ? "cap-row is-on" : "cap-row"}
-                    onClick={() => onOpenFloor(floor.id)}
+                    className={floor.id === viewFloorId ? "cap-row is-on" : "cap-row"}
+                    onClick={() => setViewFloorId(floor.id)}
                   >
                     <span className="cap-floor" role="cell">
                       <em>{floor.code}</em>
                       {floor.name}
                     </span>
-                    <strong role="cell">{floor.available}</strong>
-                    <span role="cell">{floor.occupied}</span>
-                    <span role="cell" className={floor.critical > 0 ? "is-alert" : ""}>{floor.critical}</span>
-                    <span role="cell">{floor.cleaning}</span>
-                    <span role="cell">{floor.total}</span>
-                    <span className="cap-occ" role="cell">
-                      <Meter share={share} />
-                      <b>{share}%</b>
-                    </span>
+                    
+                    {/* If it's a zero-bed floor, span a badge across the remaining columns */}
+                    {floor.total === 0 ? (
+                      <span className="cap-non-clinical-badge">
+                        {floor.code === 'B1' ? '[ CLINICAL SUPPORT & EVS ]' : '[ OUTPATIENT & ADMIN ]'}
+                      </span>
+                    ) : (
+                      <>
+                        <strong role="cell">{floor.available}</strong>
+                        <span role="cell">{floor.occupied}</span>
+                        <span role="cell" className={floor.critical > 0 ? "is-alert" : ""}>{floor.critical}</span>
+                        <span role="cell">{floor.cleaning}</span>
+                        <span role="cell">{floor.total}</span>
+                        <span className="cap-occ" role="cell">
+                          <Meter share={share} />
+                          <b>{share}%</b>
+                        </span>
+                      </>
+                    )}
                   </button>
                 );
               })}
@@ -464,7 +512,10 @@ return {
                         <i style={{ width: `${(dept.cleaning / dept.total) * 100}%`, background: MIX.cleaning }} />
                         <i style={{ width: `${(dept.available / dept.total) * 100}%`, background: MIX.available }} />
                       </div>
-                      <small>{share}% occupied</small>
+                      <div className="cap-dept-meta">
+                        <small>{share}% occupied</small>
+                        {share >= 95 && <span className="cap-dept-alert">AT CAPACITY</span>}
+                      </div>
                     </div>
                     <strong>{dept.available}</strong>
                   </li>
@@ -489,18 +540,32 @@ function Metric({ label, value, suffix = "", alert = false }) {
 }
 
 function Unit({ unit, hospital, onOpenFloor }) {
+  // PHASE 1 FIX: If this floor doesn't have this unit, show an offline state.
+  if (unit.total === 0) {
+    return (
+      <article className="cap-unit-card is-offline">
+        <div className="cap-unit-top">
+          <span className="cap-unit-label">{unit.label}</span>
+        </div>
+        <div className="cap-unit-stat-row cap-offline-msg">
+          <span>No beds on active floor</span>
+        </div>
+      </article>
+    );
+  }
+
   const open = useCount(unit.available);
   const share = pct(unit.occupied, unit.total);
 
   // Determine unit status badge
   let statusTone = "is-nominal";
-  let statusLabel = "STABLE";
+  let statusLabel = "NOMINAL";
   if (share >= 90 || unit.available === 0) {
     statusTone = "is-critical";
-    statusLabel = "CRITICAL";
+    statusLabel = "AT CAPACITY";
   } else if (share >= 75) {
     statusTone = "is-warning";
-    statusLabel = "CONSTRAINED";
+    statusLabel = "ELEVATED";
   }
 
   const handleFloorClick = (code) => {
@@ -511,7 +576,6 @@ function Unit({ unit, hospital, onOpenFloor }) {
 
   return (
     <article className={`cap-unit-card ${statusTone}`}>
-      {/* Top row: Label + Location Pills */}
       <div className="cap-unit-top">
         <span className="cap-unit-label">{unit.label}</span>
         <div className="cap-unit-pills">
@@ -529,7 +593,6 @@ function Unit({ unit, hospital, onOpenFloor }) {
         </div>
       </div>
 
-      {/* Main Stat row: Large Open Count + Status Badge */}
       <div className="cap-unit-stat-row">
         <div className="cap-unit-open-wrap">
           <strong>{open}</strong>
@@ -540,7 +603,6 @@ function Unit({ unit, hospital, onOpenFloor }) {
         </span>
       </div>
 
-      {/* Meter track with census ratio & percentage header */}
       <div className="cap-unit-meter-section">
         <div className="cap-unit-ratio-row">
           <span>{unit.occupied} of {unit.total} in use</span>
@@ -549,7 +611,6 @@ function Unit({ unit, hospital, onOpenFloor }) {
         <Meter share={share} />
       </div>
 
-      {/* Standardized Bottom Buffer / Surge row */}
       <div className="cap-unit-footer">
         {unit.surge != null ? (
           unit.surge > 0 ? (

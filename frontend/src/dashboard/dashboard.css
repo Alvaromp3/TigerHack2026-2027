@@ -3255,3 +3255,63 @@ button.flow-line-btn:hover { background: #f7f6f2; }
 .surge-status-nominal {
   color: #64748b;
 }
+
+/* --- Phase 2: Table Layout & Badge Spanning --- */
+.cap-row {
+  /* This tightens the gap between the Floor name and the Open count */
+  grid-template-columns: 2.5fr 1fr 1fr 1fr 1fr 1fr 1.5fr !important;
+  align-items: center;
+}
+
+.cap-non-clinical-badge {
+  grid-column: 2 / -1; 
+  justify-self: flex-end; /* Pushes the badge to the right */
+  margin-right: 0rem;   /* Gives it comfortable breathing room */
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #475569;
+  background: #f1f5f9;
+  padding: 0.35rem 0.65rem;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  border: 1px solid #e2e8f0;
+}
+
+/* --- Phase 1: Offline State for Units --- */
+.cap-unit-card.is-offline {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  box-shadow: none;
+}
+
+.cap-unit-card.is-offline .cap-unit-label {
+  color: #94a3b8;
+}
+
+.cap-offline-msg {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #94a3b8;
+  font-style: italic;
+  padding-top: 1rem;
+}
+
+/* --- Phase 3: Department Alerts --- */
+/* Replaces .cap-dept-label-row */
+.cap-dept-meta {
+  display: flex;
+  justify-content: space-between; /* Pushes % left and badge right */
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+/* Ensure the alert badge still looks crisp */
+.cap-dept-alert {
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: #b91c1c;
+  background: #fee2e2;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
