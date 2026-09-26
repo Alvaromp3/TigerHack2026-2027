@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
+import Overview from "./Overview";
 import {
   BUILDING,
   FRAME,
@@ -317,9 +318,12 @@ export default function CommandCenter() {
   }
 
   function chooseNav(id) {
-    setNav(id);
     setElevatorOpen(false);
-    if (id === "incidents" || id === "flow") {
+    if (nav === "overview" && id !== "overview") {
+      setFitToken((token) => token + 1);
+    }
+    setNav(id);
+    if (id === "incidents" || id === "flow" || id === "overview") {
       setNote(null);
       return;
     }
@@ -547,7 +551,13 @@ export default function CommandCenter() {
               <img src="/main-hospital.jpg?v=3" alt="Main Hospital" />
               <strong>Main Hospital</strong>
             </div>
-            <div className="campus-floors" role="group" aria-label="Floors">
+            <div
+              className="campus-floors"
+              role="group"
+              aria-label="Floors"
+              style={{ "--floor-index": Math.max(0, hospital.findIndex((level) => level.id === floor.id)) }}
+            >
+              <span className="floor-thumb" aria-hidden="true" />
               {hospital.map((level) => (
                 <button
                   key={level.id}
@@ -568,6 +578,26 @@ export default function CommandCenter() {
         </aside>
 
         <main className="stage">
+          {nav === "overview" && (
+            <Overview
+              hospital={hospital}
+              surgeOn={surgeOn}
+              transfers={transfers}
+              movements={movements}
+              onOpenFloor={(id) => {
+                setFloorId(id);
+                setSelectedId(null);
+                setHover(null);
+                setNote(null);
+                setElevatorOpen(false);
+                setNav("live");
+                setFitToken((token) => token + 1);
+              }}
+              onOpenMovement={openMovement}
+              onDeclareSurge={declareSurge}
+            />
+          )}
+          {nav !== "overview" && (
           <div
             ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
@@ -775,6 +805,7 @@ export default function CommandCenter() {
               </div>
             )}
           </div>
+          )}
         </main>
       </div>
     </div>
