@@ -492,6 +492,27 @@ export function findRooms(hospital, query) {
   return hits.slice(0, 8);
 }
 
+const OCCUPIED_STATUS = new Set(["critical", "warning", "normal"]);
+
+export function applyCensus(hospital, rooms) {
+  const byId = new Map(rooms.map((room) => [room.id, room]));
+  return hospital.map((floor) => ({
+    ...floor,
+    rooms: floor.rooms.map((room) => {
+      const live = byId.get(room.id);
+      if (!live) return room;
+      const occupied = OCCUPIED_STATUS.has(live.status);
+      return {
+        ...room,
+        status: live.status,
+        patient: occupied ? live.patient : null,
+        physician: occupied ? live.physician : null,
+        nurse: occupied ? live.nurse : null,
+      };
+    }),
+  }));
+}
+
 export function applySurge(hospital) {
   let flipped = 0;
   const next = hospital.map((floor) => {

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     auth0_domain: str = ""
     auth0_client_id: str = ""
     auth0_client_secret: str = ""
+    database_url: str = "postgresql+psycopg://tigerhack:tigerhack@localhost:5433/tigerhack"
 
     model_config = SettingsConfigDict(
         env_file=".env",
