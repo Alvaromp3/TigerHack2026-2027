@@ -6,7 +6,7 @@ import threading
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.catalog import DESTINATIONS, OCCUPIED, crew, fresh_patient_name
+from app.catalog import DESTINATIONS, OCCUPIED, clinical_case, crew, fresh_patient_name
 from app.models import FlowEvent, HospitalState, Patient, Room, Transfer
 
 log = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ def declare_surge(db: Session) -> int:
             physician, nurse = crew(team, 0)
             name = fresh_patient_name(taken, flipped)
             taken.add(name)
+            case = clinical_case(name, "critical", flipped)
             db.add(Patient(
                 name=name,
                 acuity="critical",
@@ -79,6 +80,9 @@ def declare_surge(db: Session) -> int:
                 needs_or=False,
                 physician=physician,
                 nurse=nurse,
+                age=case["age"],
+                chief_complaint=case["chief_complaint"],
+                diagnosis=case["diagnosis"],
             ))
             room.status = "critical"
         _log(db, "Command", f"Surge declared. {flipped} open beds held on F1 and F3.", None)
@@ -169,6 +173,7 @@ def _admit(db: Session):
     acuity = ("critical", "normal", "warning", "normal")[index % 4]
     name = _fresh_name(db, index)
     physician, nurse = crew("ed", index)
+    case = clinical_case(name, acuity, index)
     patient = Patient(
         name=name,
         acuity=acuity,
@@ -176,6 +181,9 @@ def _admit(db: Session):
         needs_or=acuity != "critical" and index % 3 == 0,
         physician=physician,
         nurse=nurse,
+        age=case["age"],
+        chief_complaint=case["chief_complaint"],
+        diagnosis=case["diagnosis"],
     )
     db.add(patient)
     bed.status = acuity

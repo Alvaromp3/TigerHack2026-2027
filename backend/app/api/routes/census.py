@@ -23,6 +23,9 @@ def _room_payload(room: Room):
         "needs_or": patient.needs_or if patient else False,
         "physician": patient.physician if patient else None,
         "nurse": patient.nurse if patient else None,
+        "age": patient.age if patient else None,
+        "chief_complaint": patient.chief_complaint if patient else None,
+        "diagnosis": patient.diagnosis if patient else None,
     }
 
 

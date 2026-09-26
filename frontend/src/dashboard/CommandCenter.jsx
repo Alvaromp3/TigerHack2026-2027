@@ -188,27 +188,170 @@ function Icon({ name }) {
 }
 
 function equipmentFor(room) {
-  if (!room?.census) return [];
-  const busy = room.status === "critical" || room.status === "warning" || room.status === "normal";
-  const rows = [
-    { name: "Patient monitor", state: room.status === "cleaning" ? "Cleaning" : "Operational" },
-    { name: "Infusion pump", state: room.status === "cleaning" ? "Cleaning" : "Operational" },
-    { name: "Bedside oxygen", state: "Operational" },
-  ];
-  if (room.dept === "icu" || room.dept === "trauma" || room.status === "critical") {
-    rows.splice(1, 0, {
-      name: "Ventilator",
-      state: busy ? "Operational" : "Standby",
-    });
-  }
-  if (room.kind === "or") {
+  if (!room?.census) {
+    if (room?.kind === "or") {
+      return [
+        { name: "Anesthesia machine", state: "Standby", note: "Ready for next case" },
+        { name: "Surgical lights", state: "Operational", note: "Both booms online" },
+        { name: "Electrosurgery unit", state: "Standby", note: "Self-test passed" },
+        { name: "OR table", state: "Operational", note: "Locked and leveled" },
+      ];
+    }
     return [
-      { name: "Anesthesia machine", state: room.status === "available" ? "Standby" : "Operational" },
-      { name: "Surgical table", state: "Operational" },
-      { name: "Overhead lights", state: "Operational" },
+      { name: "Wall O₂ / air", state: "Operational", note: "Line pressure normal" },
+      { name: "Suction", state: "Operational", note: "Canister ready" },
     ];
   }
+
+  const busy = ["critical", "warning", "normal"].includes(room.status);
+  const critical = room.status === "critical";
+  const cleaning = room.status === "cleaning";
+  const rows = [
+    {
+      name: "Patient monitor",
+      state: cleaning ? "Cleaning" : "Operational",
+      note: critical ? "Continuous vitals · alarms armed" : busy ? "Telemetry active" : "Standby on bed",
+    },
+    {
+      name: "Infusion pump",
+      state: cleaning ? "Cleaning" : busy ? "Operational" : "Standby",
+      note: busy ? (critical ? "Pressors / fluids running" : "Maintenance fluids") : "Cassette clear",
+    },
+    {
+      name: "Bedside oxygen",
+      state: "Operational",
+      note: critical ? "High-flow capable" : "Nasal cannula ready",
+    },
+    {
+      name: "Crash cart",
+      state: critical ? "At bedside" : "On unit",
+      note: critical ? "Defib pads applied" : "Sealed · last check today",
+    },
+  ];
+
+  if (room.dept === "icu" || room.dept === "trauma" || room.dept === "ed" || critical) {
+    rows.splice(1, 0, {
+      name: "Ventilator",
+      state: critical ? "Operational" : busy ? "Standby" : "Standby",
+      note: critical ? "Invasive / NIV ready" : "Circuit checked",
+    });
+  }
+
+  if (room.dept === "ed" || room.dept === "trauma") {
+    rows.push({
+      name: "Portable ultrasound",
+      state: "Operational",
+      note: critical ? "FAST exam available" : "Charged on dock",
+    });
+  }
+
+  if (room.kind === "or") {
+    return [
+      { name: "Anesthesia machine", state: room.status === "available" ? "Standby" : "Operational", note: "Gas scavenger ok" },
+      { name: "Surgical table", state: "Operational", note: "Position locked" },
+      { name: "Overhead lights", state: "Operational", note: "Both banks on" },
+      { name: "C-arm / imaging", state: room.status === "available" ? "Standby" : "Operational", note: "Lead drapes ready" },
+    ];
+  }
+
   return rows;
+}
+
+function esiFor(status) {
+  if (status === "critical") return "ESI 1 · Immediate";
+  if (status === "warning") return "ESI 2 · Emergent";
+  if (status === "normal") return "ESI 3 · Urgent";
+  return "—";
+}
+
+function vitalsFor(room) {
+  if (!room?.patient) return null;
+  if (room.status === "critical") {
+    return { hr: "118", bp: "88/54", spo2: "91%", rr: "28", temp: "38.4°C" };
+  }
+  if (room.status === "warning") {
+    return { hr: "104", bp: "148/92", spo2: "94%", rr: "22", temp: "37.8°C" };
+  }
+  return { hr: "82", bp: "128/78", spo2: "98%", rr: "16", temp: "36.9°C" };
+}
+
+function planFor(room) {
+  if (!room?.patient) return [];
+  const steps = [];
+  if (room.chiefComplaint) steps.push(`Address: ${room.chiefComplaint}`);
+  if (room.diagnosis) steps.push(`Working dx: ${room.diagnosis}`);
+  if (room.needsOr) steps.push("OR hold requested — surgeon notified");
+  if (room.status === "critical") {
+    steps.push("Stay with patient · q5 min vitals");
+    steps.push("Blood bank / imaging on standby");
+  } else if (room.status === "warning") {
+    steps.push("Reassess in 15 min · escalate if worsening");
+  } else {
+    steps.push("Await labs / imaging · disposition pending");
+  }
+  return steps;
+}
+
+function historyFor(room, movements = []) {
+  const live = (movements || [])
+    .filter((item) => item.room_id === room.id || (room.patient && item.patient_name === room.patient))
+    .slice(0, 8)
+    .map((item) => {
+      const stamp = item.created_at ? new Date(item.created_at) : null;
+      const time = stamp && !Number.isNaN(stamp.getTime())
+        ? stamp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+        : "—";
+      return {
+        time,
+        text: item.message,
+        tag: item.patient_name === "Command" || item.patient_name === "Housekeeping" || item.patient_name === "Census"
+          ? item.patient_name
+          : "Flow",
+      };
+    });
+
+  if (live.length) return live;
+
+  if (room.activity?.length) return room.activity;
+
+  if (!room.census) {
+    return [{ time: "—", text: "No clinical events logged for this space.", tag: "Floor" }];
+  }
+
+  if (room.status === "available") {
+    return [
+      { time: "09:40", text: "Bed marked ready for assignment", tag: "Housekeeping" },
+      { time: "09:22", text: "Terminal clean complete", tag: "EVS" },
+    ];
+  }
+  if (room.status === "cleaning") {
+    return [
+      { time: "10:12", text: "Turnover in progress", tag: "Housekeeping" },
+      { time: "10:05", text: "Previous patient discharged", tag: "Nursing" },
+    ];
+  }
+  if (room.patient) {
+    const rows = [
+      { time: "10:18", text: `${room.patient} assigned to ${room.id}`, tag: "Charge nurse" },
+      { time: "10:05", text: room.chiefComplaint || "Chief complaint documented", tag: "Triage" },
+      { time: "09:52", text: room.diagnosis ? `Working diagnosis: ${room.diagnosis}` : "Workup started", tag: "Physician" },
+      { time: "09:40", text: `${room.physician || "Attending"} at bedside`, tag: "Physician" },
+      { time: "09:28", text: `${room.nurse || "Primary nurse"} assumed care`, tag: "Nursing" },
+    ];
+    if (room.needsOr) rows.splice(2, 0, { time: "09:58", text: "OR reservation requested", tag: "Surgery" });
+    if (room.status === "critical") rows.unshift({ time: "10:24", text: "Acuity raised to critical", tag: "Charge nurse" });
+    return rows;
+  }
+  return [{ time: "—", text: "No clinical events on this room.", tag: "Floor" }];
+}
+
+function Meta({ label, children }) {
+  return (
+    <div className="meta-row">
+      <span>{label}</span>
+      <strong>{children}</strong>
+    </div>
+  );
 }
 
 function Stat({ tone, label, value }) {
@@ -825,6 +968,7 @@ export default function CommandCenter() {
                     onTab={setTab}
                     occPct={occPct}
                     deptBeds={deptBeds}
+                    movements={movements}
                     onClose={() => setSelectedId(null)}
                   />
                 )}
@@ -851,10 +995,16 @@ export default function CommandCenter() {
   );
 }
 
-function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
+function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], onClose }) {
   const gear = equipmentFor(room);
   const critical = deptBeds.filter((item) => item.status === "critical").length;
   const available = deptBeds.filter((item) => item.status === "available").length;
+  const warning = deptBeds.filter((item) => item.status === "warning").length;
+  const vitals = vitalsFor(room);
+  const plan = planFor(room);
+  const history = historyFor(room, movements);
+  const occupied = Boolean(room.patient);
+
   return (
     <div>
       <div className="detail-head">
@@ -902,48 +1052,56 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
 
       {tab === "overview" && (
         <div className="sheet">
-          <div className="meta-row">
-            <span>Bed</span>
-            <strong>{room.census ? "1" : "—"}</strong>
-          </div>
-          <div className="meta-row">
-            <span>Room type</span>
-            <strong>{room.type}</strong>
-          </div>
-          <div className="meta-row">
-            <span>Area</span>
-            <strong>{room.area.toFixed(1)} m²</strong>
-          </div>
+          {occupied && (
+            <div className="detail-callout">
+              <p className="kicker">Now in this bed</p>
+              <strong>{room.patient}</strong>
+              <span>{room.diagnosis || room.chiefComplaint || STATUS[room.status]?.label}</span>
+            </div>
+          )}
+
+          <Meta label="Bed">{room.census ? "1 inpatient bed" : "Non-census space"}</Meta>
+          <Meta label="Room type">{room.type}</Meta>
+          <Meta label="Department">{room.deptLabel}</Meta>
+          <Meta label="Floor">{floor.name}</Meta>
+          <Meta label="Area">{room.area.toFixed(1)} m²</Meta>
+          <Meta label="Surge ready">{room.surge ? "Yes — holds open for MCI" : "Standard"}</Meta>
+          {room.census && (
+            <Meta label="Bed status">{STATUS[room.status]?.label || "—"}</Meta>
+          )}
+
           {room.census && deptBeds.length > 0 && (
             <div className="donut-row">
               <svg viewBox="0 0 36 36" className="donut">
-                <circle cx="18" cy="18" r="14" fill="none" stroke="#e2e8f0" strokeWidth="4" />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="#dde4ee" strokeWidth="4" />
                 <circle
                   cx="18"
                   cy="18"
                   r="14"
                   fill="none"
-                  stroke="#2563eb"
+                  stroke="#4a78b0"
                   strokeWidth="4"
                   strokeDasharray={`${occPct} ${100 - occPct}`}
                   strokeDashoffset="25"
                   pathLength="100"
                 />
-                <text x="18" y="20" textAnchor="middle" fontSize="8" fontWeight="700" fill="#0f172a">
+                <text x="18" y="20" textAnchor="middle" fontSize="8" fontWeight="600" fill="#020c21">
                   {occPct}%
                 </text>
               </svg>
               <div>
-                <p className="kicker">Occupancy · {room.deptLabel}</p>
+                <p className="kicker">Unit occupancy · {room.deptLabel}</p>
                 <ul>
                   <li><i className="amber" /> Occupied {deptOccupiedSafe(deptBeds)}</li>
                   <li><i className="teal" /> Available {available}</li>
                   <li><i className="red" /> Critical {critical}</li>
+                  <li><i className="slate" /> Watch {warning}</li>
                 </ul>
               </div>
             </div>
           )}
-          {(room.physician || room.charge) && (
+
+          {(room.physician || room.charge || room.nurse) && (
             <div className="team">
               <p className="kicker">Care team</p>
               {room.physician && <p>Attending · {room.physician}</p>}
@@ -951,46 +1109,118 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
               {room.charge && <p>Charge nurse · {room.charge}</p>}
             </div>
           )}
+
+          {occupied && plan.length > 0 && (
+            <div className="detail-block">
+              <p className="kicker">Immediate plan</p>
+              <ul className="detail-list">
+                {plan.map((step) => <li key={step}>{step}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
       {tab === "patients" && (
         <div className="sheet">
-          {room.patient ? (
+          {occupied ? (
             <>
-              <div className="meta-row"><span>Patient</span><strong>{room.patient}</strong></div>
-              <div className="meta-row"><span>Acuity</span><strong>{STATUS[room.status].label}</strong></div>
-              <div className="meta-row"><span>Attending</span><strong>{room.physician}</strong></div>
-              <div className="meta-row"><span>Nurse</span><strong>{room.nurse}</strong></div>
+              <div className="detail-callout">
+                <p className="kicker">Chief complaint</p>
+                <strong>{room.chiefComplaint || "Not documented"}</strong>
+                <span>{room.diagnosis || "Working diagnosis pending"}</span>
+              </div>
+
+              <Meta label="Patient">{room.patient}</Meta>
+              <Meta label="Age">{room.age != null ? `${room.age} yrs` : "—"}</Meta>
+              <Meta label="Acuity">{STATUS[room.status]?.label || room.acuity || "—"}</Meta>
+              <Meta label="Triage">{esiFor(room.status)}</Meta>
+              <Meta label="OR needed">{room.needsOr ? "Yes — hold requested" : "No"}</Meta>
+              <Meta label="Attending">{room.physician || "—"}</Meta>
+              <Meta label="Primary nurse">{room.nurse || "—"}</Meta>
+              <Meta label="Bed">{room.id}</Meta>
+
+              {vitals && (
+                <div className="detail-block">
+                  <p className="kicker">Latest vitals</p>
+                  <div className="vital-grid">
+                    <div><span>HR</span><strong>{vitals.hr}</strong></div>
+                    <div><span>BP</span><strong>{vitals.bp}</strong></div>
+                    <div><span>SpO₂</span><strong>{vitals.spo2}</strong></div>
+                    <div><span>RR</span><strong>{vitals.rr}</strong></div>
+                    <div><span>Temp</span><strong>{vitals.temp}</strong></div>
+                  </div>
+                </div>
+              )}
+
+              <div className="detail-block">
+                <p className="kicker">Clinical summary</p>
+                <p className="detail-copy">
+                  {room.patient} is a {room.age != null ? `${room.age}-year-old` : "adult"} presenting with{" "}
+                  {(room.chiefComplaint || "an acute complaint").toLowerCase()}. Current working diagnosis:{" "}
+                  {room.diagnosis || "under evaluation"}. Acuity is {STATUS[room.status]?.label?.toLowerCase() || "active"}
+                  {room.needsOr ? "; surgical intervention may be required." : "."}
+                </p>
+              </div>
+
+              {plan.length > 0 && (
+                <div className="detail-block">
+                  <p className="kicker">Care plan</p>
+                  <ul className="detail-list">
+                    {plan.map((step) => <li key={step}>{step}</li>)}
+                  </ul>
+                </div>
+              )}
             </>
           ) : (
-            <p>No patient in this space. {room.census ? "The bed is open for assignment." : "This room is not an inpatient bed."}</p>
+            <div className="detail-empty">
+              <p className="kicker">No patient assigned</p>
+              <p className="detail-copy">
+                {room.census
+                  ? "This bed is open for assignment. Declare surge or wait for the next admit from triage."
+                  : "This space is not an inpatient bed — use it for support workflow only."}
+              </p>
+            </div>
           )}
         </div>
       )}
 
       {tab === "equipment" && (
-        <ul className="equip">
-          {gear.length === 0 && <li>No bedside devices in this room.</li>}
-          {gear.map((item) => (
-            <li key={item.name}>
-              <span>{item.name}</span>
-              <strong className={item.state === "Operational" ? "ok" : "warn"}>{item.state}</strong>
-            </li>
-          ))}
-        </ul>
+        <div className="sheet">
+          <p className="kicker">Bedside devices</p>
+          <ul className="equip equip-rich">
+            {gear.length === 0 && <li>No bedside devices in this room.</li>}
+            {gear.map((item) => (
+              <li key={item.name}>
+                <div>
+                  <span>{item.name}</span>
+                  {item.note && <small>{item.note}</small>}
+                </div>
+                <strong className={item.state === "Operational" || item.state === "At bedside" ? "ok" : "warn"}>
+                  {item.state}
+                </strong>
+              </li>
+            ))}
+          </ul>
+          {occupied && room.status === "critical" && (
+            <p className="detail-note">Critical pathway: crash cart and airway kit staged at the door.</p>
+          )}
+        </div>
       )}
 
       {tab === "history" && (
-        <ul className="activity">
-          {(room.activity || [{ time: "—", text: "No clinical events on this room.", tag: "Floor" }]).map((item) => (
-            <li key={`${item.time}-${item.text}`}>
-              <strong>{item.time}</strong>
-              <span>{item.text}</span>
-              <em>{item.tag}</em>
-            </li>
-          ))}
-        </ul>
+        <div className="sheet">
+          <p className="kicker">Room timeline</p>
+          <ul className="activity">
+            {history.map((item) => (
+              <li key={`${item.time}-${item.text}`}>
+                <strong>{item.time}</strong>
+                <span>{item.text}</span>
+                <em>{item.tag}</em>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

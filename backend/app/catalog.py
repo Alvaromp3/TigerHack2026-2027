@@ -68,6 +68,50 @@ DESTINATIONS = {
     "or_full": "Heart Center",
 }
 
+# Deterministic clinical profiles for census patients.
+CASES = [
+    {"age": 67, "chief_complaint": "Crush injury after train collision", "diagnosis": "Polytrauma, hemorrhagic shock"},
+    {"age": 41, "chief_complaint": "Sudden chest pain and diaphoresis", "diagnosis": "STEMI — anterior wall"},
+    {"age": 29, "chief_complaint": "Migraine unrelieved at home", "diagnosis": "Status migrainosus"},
+    {"age": 58, "chief_complaint": "Shortness of breath, fever", "diagnosis": "Community-acquired pneumonia"},
+    {"age": 74, "chief_complaint": "Fall with hip pain, cannot bear weight", "diagnosis": "Right femoral neck fracture"},
+    {"age": 33, "chief_complaint": "Twisted ankle after a fall", "diagnosis": "Ankle fracture"},
+    {"age": 52, "chief_complaint": "Worsening asthma overnight", "diagnosis": "Acute asthma"},
+    {"age": 81, "chief_complaint": "Left-sided weakness", "diagnosis": "Acute ischemic stroke"},
+    {"age": 46, "chief_complaint": "Abdominal pain and vomiting", "diagnosis": "Acute appendicitis"},
+    {"age": 22, "chief_complaint": "Motorcycle crash, neck pain", "diagnosis": "Cervical spine precaution"},
+    {"age": 63, "chief_complaint": "Palpitations and lightheadedness", "diagnosis": "Atrial fibrillation with RVR"},
+    {"age": 37, "chief_complaint": "Severe allergic reaction", "diagnosis": "Anaphylaxis — resolved"},
+    {"age": 55, "chief_complaint": "Epigastric pain radiating to back", "diagnosis": "Acute pancreatitis"},
+    {"age": 19, "chief_complaint": "Seizure at school", "diagnosis": "New-onset seizure"},
+    {"age": 70, "chief_complaint": "Altered mental status", "diagnosis": "Sepsis — source unclear"},
+    {"age": 44, "chief_complaint": "Gunshot wound to abdomen", "diagnosis": "Penetrating abdominal trauma"},
+    {"age": 61, "chief_complaint": "Syncope at home", "diagnosis": "High-grade AV block"},
+    {"age": 28, "chief_complaint": "Overdose, decreased responsiveness", "diagnosis": "Opioid overdose — reverse"},
+    {"age": 49, "chief_complaint": "Severe headache, worst of life", "diagnosis": "SAH ruled out — migraine"},
+    {"age": 36, "chief_complaint": "Cut hand on broken glass", "diagnosis": "Laceration, needs repair"},
+    {"age": 77, "chief_complaint": "Confusion and low urine output", "diagnosis": "Urosepsis"},
+    {"age": 31, "chief_complaint": "Pregnancy, vaginal bleeding", "diagnosis": "Threatened miscarriage"},
+    {"age": 54, "chief_complaint": "Burns to arms and face", "diagnosis": "Partial-thickness burns 12% TBSA"},
+    {"age": 42, "chief_complaint": "Diabetic, high sugars, vomiting", "diagnosis": "DKA"},
+]
+
+
+def clinical_case(name: str, acuity: str, index: int = 0):
+    """Pick a stable case for a patient name; critical cases bias toward trauma."""
+    seed = sum(ord(ch) for ch in name) + index * 17
+    if acuity == "critical":
+        pool = [c for c in CASES if "trauma" in c["diagnosis"].lower() or "shock" in c["diagnosis"].lower()
+                or "STEMI" in c["diagnosis"] or "stroke" in c["diagnosis"].lower()
+                or "Gunshot" in c["chief_complaint"] or "Sepsis" in c["diagnosis"]
+                or "anaphylaxis" in c["diagnosis"].lower() or "block" in c["diagnosis"].lower()]
+        if not pool:
+            pool = CASES
+        case = pool[seed % len(pool)]
+    else:
+        case = CASES[seed % len(CASES)]
+    return dict(case)
+
 
 def crew(team, nurse_index=0):
     physician, nurses = CREWS[team]
@@ -139,6 +183,10 @@ def census_rooms():
         spec["patient"] = PATIENTS[cursor]
         cursor += 1
         spec["physician"], spec["nurse"] = crew(spec["team"], spec["nurse_index"])
+        case = clinical_case(spec["patient"], spec["status"], cursor)
+        spec["age"] = case["age"]
+        spec["chief_complaint"] = case["chief_complaint"]
+        spec["diagnosis"] = case["diagnosis"]
         if spec["kind"] == "or":
             spec["needs_or"] = True
         elif spec["floor_id"] == "F2" and spec["status"] != "critical" and spec["id"].endswith(("1", "5", "9")):

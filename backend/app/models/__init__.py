@@ -31,6 +31,9 @@ class Patient(Base):
     needs_or: Mapped[bool] = mapped_column(Boolean, default=False)
     physician: Mapped[str] = mapped_column(String(80))
     nurse: Mapped[str] = mapped_column(String(80))
+    age: Mapped[int | None] = mapped_column(nullable=True)
+    chief_complaint: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    diagnosis: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
     room: Mapped[Room] = relationship(back_populates="patient")
 

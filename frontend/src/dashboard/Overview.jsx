@@ -2,13 +2,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DEPT } from "./floors";
 import { FLOW_BUCKETS, flowBucket } from "./flowBuckets";
 
-const INK = "#1c1c1a";
-const CRITICAL = "#c1512f";
-const STABLE = "#3a5a72";
-const OPEN = "#0f6e56";
-const WATCH = "#c9922f";
-const LINE = "#eceae2";
-const MUTED = "#8a8a86";
+const INK = "#020c21";
+const CRITICAL = "#cf4b3e";
+const STABLE = "#4a78b0";
+const OPEN = "#3f9142";
+const WATCH = "#cc8a2c";
+const LINE = "#dde4ee";
+const MUTED = "#59627e";
 
 const TABS = [
   { id: "overview", label: "Overview" },

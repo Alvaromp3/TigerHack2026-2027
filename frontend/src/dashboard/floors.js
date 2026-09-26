@@ -23,7 +23,7 @@ export const TREES = [
 
 export const DEPT = {
   icu: { label: "Intensive Care", color: "#d7f6ea", ink: "#0f766e" },
-  surgery: { label: "Surgery (OR)", color: "#d9e6ff", ink: "#1d4ed8" },
+  surgery: { label: "Surgery (OR)", color: "#e6edf6", ink: "#4a78b0" },
   imaging: { label: "Radiology", color: "#e6e2ff", ink: "#5b21b6" },
   ed: { label: "Emergency / Trauma", color: "#fde2e6", ink: "#be123c" },
   trauma: { label: "Emergency / Trauma", color: "#fecdd6", ink: "#9f1239" },
@@ -33,9 +33,9 @@ export const DEPT = {
   pharmacy: { label: "Pharmacy", color: "#e3f6cf", ink: "#3f6212" },
   waiting: { label: "Waiting", color: "#fbcfe8", ink: "#9d174d" },
   outpatient: { label: "Outpatient", color: "#e0e7ff", ink: "#3730a3" },
-  support: { label: "Support", color: "#f1f5f9", ink: "#475569" },
-  nurse: { label: "Staff Station", color: "#f8fafc", ink: "#334155" },
-  spd: { label: "Sterile Processing", color: "#e2e8f0", ink: "#334155" },
+  support: { label: "Support", color: "#e6edf6", ink: "#4d5b77" },
+  nurse: { label: "Staff Station", color: "#f4f7fb", ink: "#33415c" },
+  spd: { label: "Sterile Processing", color: "#dde4ee", ink: "#33415c" },
   storage: { label: "Storage", color: "#fef3c7", ink: "#92400e" },
   morgue: { label: "Morgue", color: "#e7e5e4", ink: "#44403c" },
   mechanical: { label: "Mechanical", color: "#e2e8f0", ink: "#475569" },
@@ -46,11 +46,11 @@ export const DEPT = {
 };
 
 export const STATUS = {
-  critical: { label: "Critical", color: "#e11d48" },
-  warning: { label: "Warning", color: "#f59e0b" },
-  normal: { label: "Normal", color: "#22c55e" },
-  available: { label: "Available", color: "#14b8a6" },
-  cleaning: { label: "Cleaning", color: "#8b5cf6" },
+  critical: { label: "Critical", color: "#cf4b3e" },
+  warning: { label: "Warning", color: "#cc8a2c" },
+  normal: { label: "Normal", color: "#3f9142" },
+  available: { label: "Available", color: "#2f8f86" },
+  cleaning: { label: "Cleaning", color: "#6b7db5" },
 };
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
@@ -477,7 +477,7 @@ export function summarize(floor) {
     const current = seen.get(room.dept) || {
       id: room.dept,
       label: DEPT[room.dept]?.label || room.deptLabel,
-      color: DEPT[room.dept]?.ink || "#64748b",
+      color: DEPT[room.dept]?.ink || "#59627e",
       beds: 0,
       rooms: 0,
     };
@@ -507,7 +507,7 @@ export function findRooms(hospital, query) {
   const hits = [];
   for (const floor of hospital) {
     for (const room of floor.rooms) {
-      const blob = `${room.id} ${room.deptLabel} ${room.type} ${room.patient || ""}`.toLowerCase();
+      const blob = `${room.id} ${room.deptLabel} ${room.type} ${room.patient || ""} ${room.chiefComplaint || ""} ${room.diagnosis || ""}`.toLowerCase();
       if (blob.includes(needle)) hits.push({ floor, room });
     }
   }
@@ -530,6 +530,11 @@ export function applyCensus(hospital, rooms) {
         patient: occupied ? live.patient : null,
         physician: occupied ? live.physician : null,
         nurse: occupied ? live.nurse : null,
+        acuity: occupied ? live.acuity || live.status : null,
+        needsOr: occupied ? Boolean(live.needs_or) : false,
+        age: occupied ? live.age ?? null : null,
+        chiefComplaint: occupied ? live.chief_complaint || null : null,
+        diagnosis: occupied ? live.diagnosis || null : null,
       };
     }),
   }));

@@ -61,7 +61,7 @@ function Stairs({ item }) {
         <path d="M8 20h4v-4h4v-4h4V8" fill="none" stroke="#fff" strokeWidth="2.4" />
         <circle cx="8" cy="8" r="2.2" fill="#fff" />
       </Pictogram>
-      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.72" fontWeight="700" fill="#1d4ed8" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.22, paintOrder: "stroke" }}>
+      <text x={cx} y={item.y + item.h - 0.28} textAnchor="middle" fontSize="0.72" fontWeight="700" fill="#4a78b0" style={{ pointerEvents: "none", stroke: "#ffffff", strokeWidth: 0.22, paintOrder: "stroke" }}>
         Stair
       </text>
     </g>
@@ -79,7 +79,7 @@ function Elevator({ item, active }) {
         width={item.w}
         height={item.h}
         fill={active ? "#dbeafe" : "#e7edf3"}
-        stroke={active ? "#2563eb" : "#d0d7e2"}
+        stroke={active ? "#4a78b0" : "#d0d7e2"}
         strokeWidth="0.06"
       />
       <Pictogram x={cx} y={cy - 0.28} fill="#111827">
@@ -137,7 +137,7 @@ function RoomTag({ room, selected }) {
         textAnchor="middle"
         fontSize={titleSize}
         fontWeight="700"
-        fill={selected ? "#14532d" : "#0f172a"}
+        fill={selected ? "#14532d" : "#020c21"}
         style={ink}
       >
         {title}
