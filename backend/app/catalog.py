@@ -47,6 +47,34 @@ def _names():
 
 PATIENTS = _names()
 
+CASES = [
+    {"age": 74, "chief_complaint": "Crushing chest pain", "diagnosis": "Anterior STEMI"},
+    {"age": 58, "chief_complaint": "Sudden shortness of breath", "diagnosis": "Pulmonary embolism"},
+    {"age": 81, "chief_complaint": "Left-sided weakness", "diagnosis": "Acute ischemic stroke"},
+    {"age": 46, "chief_complaint": "Right lower quadrant pain", "diagnosis": "Acute appendicitis"},
+    {"age": 67, "chief_complaint": "Fever and productive cough", "diagnosis": "Community pneumonia"},
+    {"age": 33, "chief_complaint": "Twisted ankle after a fall", "diagnosis": "Ankle fracture"},
+    {"age": 52, "chief_complaint": "Worsening asthma overnight", "diagnosis": "Acute asthma"},
+    {"age": 70, "chief_complaint": "Black stool and dizziness", "diagnosis": "Upper GI bleed"},
+    {"age": 29, "chief_complaint": "Migraine unrelieved at home", "diagnosis": "Status migrainosus"},
+    {"age": 63, "chief_complaint": "Painful swollen calf", "diagnosis": "Deep vein thrombosis"},
+    {"age": 77, "chief_complaint": "Confusion and low urine output", "diagnosis": "Urosepsis"},
+    {"age": 41, "chief_complaint": "Severe epigastric pain", "diagnosis": "Pancreatitis"},
+    {"age": 55, "chief_complaint": "Palpitations and near syncope", "diagnosis": "Atrial fibrillation"},
+    {"age": 36, "chief_complaint": "Cut hand on broken glass", "diagnosis": "Laceration, needs repair"},
+    {"age": 84, "chief_complaint": "Hip pain after a fall", "diagnosis": "Femoral neck fracture"},
+    {"age": 48, "chief_complaint": "Burning epigastric pain", "diagnosis": "Peptic ulcer"},
+    {"age": 61, "chief_complaint": "High sugars and vomiting", "diagnosis": "Diabetic ketoacidosis"},
+    {"age": 22, "chief_complaint": "Ankle sprain playing soccer", "diagnosis": "Lateral ankle sprain"},
+    {"age": 72, "chief_complaint": "Wheezing and ankle swelling", "diagnosis": "Heart failure flare"},
+    {"age": 39, "chief_complaint": "Gallbladder pain after dinner", "diagnosis": "Cholecystitis"},
+]
+
+
+def random_case():
+    import random
+    return random.choice(CASES)
+
 
 def fresh_patient_name(taken: set[str], index: int = 0) -> str:
     """Next unused full name. Never appends a number."""
