@@ -1,25 +1,30 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
-  plugins: [react()],
-  build: {
-    rollupOptions: {
-      input: {
-        landing: resolve(__dirname, "index.html"),
-        app: resolve(__dirname, "app.html"),
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const api = env.VITE_API_URL || "https://tigerhack-api.onrender.com";
+
+  return {
+    plugins: [react()],
+    build: {
+      rollupOptions: {
+        input: {
+          landing: resolve(__dirname, "index.html"),
+          app: resolve(__dirname, "app.html"),
+        },
       },
     },
-  },
-  server: {
-    host: "localhost",
-    port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
+    server: {
+      host: "localhost",
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: api,
+          changeOrigin: true,
+        },
       },
     },
-  },
+  };
 });

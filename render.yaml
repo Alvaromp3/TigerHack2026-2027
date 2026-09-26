@@ -1,0 +1,35 @@
+# Render Blueprint for the shared API.
+# Apply from the repo root: Dashboard → Blueprints → New Blueprint Instance.
+# Do not add a databases: block here. Postgres already exists (tigerhack-db)
+# and holds the live census. A new database in this file would be empty.
+services:
+  - type: web
+    name: tigerhack-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.14"
+      - key: APP_NAME
+        value: Health Hackathon API
+      - key: DEBUG
+        value: "false"
+      - key: CORS_ORIGINS
+        value: http://localhost:5173
+      # Paste the Internal Database URL from tigerhack-db, and change the
+      # scheme from postgresql:// to postgresql+psycopg://
+      # Internal host stays on the private Oregon network:
+      # postgresql+psycopg://tigerhack:PASSWORD@dpg-darvt6rncjis73fatjig-a/tigerhack
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH0_DOMAIN
+        sync: false
+      - key: AUTH0_CLIENT_ID
+        sync: false
+      - key: AUTH0_CLIENT_SECRET
+        sync: false

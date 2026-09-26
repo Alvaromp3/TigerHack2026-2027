@@ -54,12 +54,34 @@ export const STATUS = {
 };
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
-const PATIENTS = [
-  "Sofia Alvarez", "James Whitfield", "Noah Bennett", "Amina Diallo", "Helen Cho",
-  "Mateo Ruiz", "Grace Ibrahim", "Owen Clarke", "Priya Nair", "Samuel Ortiz",
-  "Lila Berg", "Jonah Abebe", "Emma Walsh", "Hugo Ferreira", "Nora Kim",
-  "Eliot March", "Clara Voss", "Andre Blake", "Maya Haddad", "Felix Nguyen",
+const GIVEN = [
+  "Sofia", "James", "Noah", "Amina", "Helen", "Mateo", "Grace", "Owen",
+  "Priya", "Samuel", "Lila", "Jonah", "Emma", "Hugo", "Nora", "Eliot",
+  "Clara", "Andre", "Maya", "Felix", "Camila", "Hassan", "Ruth", "Diego",
+  "Imani", "Lars", "Yara", "Mei", "Paul", "Nina", "Omar", "Leah",
+  "Victor", "Asha", "Elena", "Marcus", "Fatima", "Luis", "Hannah", "Kenji",
+  "Amara", "Theo", "Rosa", "Daniel", "Ines", "Malik", "Chloe", "Ravi",
 ];
+const FAMILY = [
+  "Alvarez", "Whitfield", "Bennett", "Diallo", "Cho", "Ruiz", "Ibrahim", "Clarke",
+  "Nair", "Ortiz", "Berg", "Abebe", "Walsh", "Ferreira", "Kim", "March",
+  "Voss", "Blake", "Haddad", "Nguyen", "Brooks", "Petrov", "Okeke", "Tanaka",
+  "Cohen", "Lang", "Reddy", "Santos", "Moreau", "Keller", "Okada", "Diaz",
+];
+const PATIENTS = (() => {
+  const pool = [];
+  const seen = new Set();
+  const span = GIVEN.length * FAMILY.length;
+  for (let index = 0; index < span; index += 1) {
+    const given = GIVEN[index % GIVEN.length];
+    const family = FAMILY[(index * 7) % FAMILY.length];
+    let full = `${given} ${family}`;
+    if (seen.has(full)) full = FAMILY.map((last) => `${given} ${last}`).find((name) => !seen.has(name));
+    seen.add(full);
+    pool.push(full);
+  }
+  return pool;
+})();
 const TEAMS = {
   icu: { physician: "Dr. Leena Patel", nurses: ["RN Maya Chen", "RN Chris Novak"], charge: "RN Adeyemi" },
   ed: { physician: "Dr. Jonah Okonkwo", nurses: ["RN Elena Brooks", "RN Jonah Blake"], charge: "RN Weiss" },
@@ -492,8 +514,36 @@ export function findRooms(hospital, query) {
   return hits.slice(0, 8);
 }
 
+const OCCUPIED_STATUS = new Set(["critical", "warning", "normal"]);
+
+export function applyCensus(hospital, rooms) {
+  const byId = new Map(rooms.map((room) => [room.id, room]));
+  return hospital.map((floor) => ({
+    ...floor,
+    rooms: floor.rooms.map((room) => {
+      const live = byId.get(room.id);
+      if (!live) return room;
+      const occupied = OCCUPIED_STATUS.has(live.status);
+      return {
+        ...room,
+        status: live.status,
+        patient: occupied ? live.patient : null,
+        physician: occupied ? live.physician : null,
+        nurse: occupied ? live.nurse : null,
+      };
+    }),
+  }));
+}
+
+function unusedName(used) {
+  const name = PATIENTS.find((candidate) => !used.has(candidate));
+  used.add(name);
+  return name;
+}
+
 export function applySurge(hospital) {
   let flipped = 0;
+  const used = new Set(hospital.flatMap((floor) => floor.rooms.map((room) => room.patient).filter(Boolean)));
   const next = hospital.map((floor) => {
     if (floor.id !== "F1" && floor.id !== "F3") return floor;
     return {
@@ -505,7 +555,7 @@ export function applySurge(hospital) {
         return {
           ...room,
           status: "critical",
-          patient: `MCI arrival ${flipped}`,
+          patient: unusedName(used),
           physician: crew.physician,
           nurse: crew.nurses[0],
           activity: [

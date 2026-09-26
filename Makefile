@@ -60,7 +60,10 @@ down:
 install: backend/.venv/bin/uvicorn frontend/node_modules
 
 backend/.venv/bin/uvicorn: backend/requirements.txt
-	python3 -m venv backend/.venv
+	@PYTHON=$$(command -v python3.11 || command -v python3); \
+	echo "Creando venv con $$PYTHON"; \
+	rm -rf backend/.venv; \
+	"$$PYTHON" -m venv backend/.venv; \
 	backend/.venv/bin/pip install -r backend/requirements.txt
 
 frontend/node_modules: frontend/package.json frontend/package-lock.json

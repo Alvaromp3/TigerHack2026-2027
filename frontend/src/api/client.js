@@ -1,7 +1,11 @@
-const API_BASE = import.meta.env.VITE_API_URL || "";
+export const API_BASE = import.meta.env.VITE_API_URL || "https://tigerhack-api.onrender.com";
+
+export function apiUrl(path) {
+  return `${API_BASE}${path}`;
+}
 
 export async function fetchAuthConfig() {
-  const res = await fetch(`${API_BASE}/api/auth/config`);
+  const res = await fetch(apiUrl("/api/auth/config"));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || "Auth0 no está configurado");
@@ -10,7 +14,7 @@ export async function fetchAuthConfig() {
 }
 
 export async function fetchHealth() {
-  const res = await fetch(`${API_BASE}/api/health`);
+  const res = await fetch(apiUrl("/api/health"));
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
