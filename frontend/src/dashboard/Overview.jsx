@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DEPT } from "./floors";
 
-const MIX = {
-  critical: "var(--red)",
-  stable: "#64748b",
-  cleaning: "#cbd5e1",
-  available: "#e2e8f0",
-};
+const INK = "#1c1c1a";
+const CRITICAL = "#c1512f";
+const STABLE = "#3a5a72";
+const OPEN = "#0f6e56";
+const WATCH = "#c9922f";
+const LINE = "#eceae2";
+const MUTED = "#8a8a86";
 
 const FLOW_BUCKETS = [
   { id: "admit", label: "Admit" },
@@ -16,6 +17,21 @@ const FLOW_BUCKETS = [
   { id: "divert", label: "Divert" },
   { id: "turnover", label: "Turnover" },
 ];
+
+const TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "flow", label: "Patient flow" },
+  { id: "staff", label: "Staffing" },
+  { id: "alerts", label: "Alerts" },
+];
+
+const SPARK = {
+  occupancy: { color: CRITICAL, suffix: "%", fraction: 0.105, shape: { freq: 2.2, phase: 0.4, amp: 1 } },
+  available: { color: OPEN, suffix: "", fraction: -0.2, shape: { freq: 1.4, phase: 1.1, amp: 0.7 } },
+  occupied: { color: INK, suffix: "", fraction: 0.16, shape: { freq: 2.6, phase: 0.2, amp: 0.55 } },
+  critical: { color: CRITICAL, suffix: "", fraction: 0.2, shape: { freq: 1.6, phase: 0.8, amp: 0.45 } },
+  cleaning: { color: "#a3a29a", suffix: "", fraction: 0, shape: { freq: 1, phase: 0, amp: 0 } },
+};
 
 function tally(rooms) {
   const beds = rooms.filter((room) => room.census);
@@ -61,10 +77,55 @@ function flowBucket(message) {
   return "move";
 }
 
-function toneClass(share) {
-  if (share >= 85) return "is-red";
-  if (share >= 70) return "is-amber";
-  return "";
+function barTone(share) {
+  if (share >= 85) return CRITICAL;
+  if (share >= 70) return WATCH;
+  return STABLE;
+}
+
+function shortDept(label) {
+  if (label.startsWith("Emergency")) return "Emergency";
+  if (label.startsWith("Medical")) return "Medical / Surg.";
+  if (label.startsWith("Surgery")) return "Surgery";
+  return label;
+}
+
+function metricDelta(id, value) {
+  if (!value) return 0;
+  const fraction = SPARK[id].fraction;
+  if (!fraction) return 0;
+  const raw = value * fraction;
+  const rounded = raw > 0 ? Math.max(1, Math.round(raw)) : Math.min(-1, Math.round(raw));
+  return rounded;
+}
+
+function formatDelta(delta, suffix) {
+  if (!delta) return "–";
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${delta}${suffix}`;
+}
+
+function sparkPoints(end, delta, shape) {
+  const steps = 18;
+  const start = end - delta;
+  const values = [];
+  for (let i = 0; i < steps; i += 1) {
+    const t = i / (steps - 1);
+    const base = start + delta * t;
+    const wave = Math.sin(t * Math.PI * shape.freq + shape.phase) * shape.amp * Math.max(Math.abs(end) * 0.045, 0.6);
+    values.push(base + wave);
+  }
+  values[values.length - 1] = end;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  return values
+    .map((value, index) => {
+      const x = (index / (steps - 1)) * 100;
+      const y = 28 - ((value - min) / span) * 22;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
 }
 
 function useCount(value, duration = 500) {
@@ -91,6 +152,16 @@ function useCount(value, duration = 500) {
   return shown;
 }
 
+function useDraw(token) {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    setDrawn(false);
+    const frame = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(frame);
+  }, [token]);
+  return drawn;
+}
+
 export default function Overview({
   hospital,
   surgeOn,
@@ -100,6 +171,7 @@ export default function Overview({
   onOpenMovement,
   onDeclareSurge,
 }) {
+  const [tab, setTab] = useState("overview");
   const model = useMemo(() => {
     const rooms = hospital.flatMap((floor) => floor.rooms);
     const house = tally(rooms);
@@ -109,7 +181,7 @@ export default function Overview({
         id: floor.id,
         code: floor.code,
         name: floor.name,
-        subtitle: floor.subtitle,
+        charge: floor.charge,
       }))
       .filter((floor) => floor.total > 0)
       .sort((a, b) => floorRank(a.code) - floorRank(b.code));
@@ -125,7 +197,7 @@ export default function Overview({
     const departments = [...grouped.entries()]
       .map(([id, deptRooms]) => ({
         id,
-        label: DEPT[id]?.label || deptRooms[0].deptLabel,
+        label: shortDept(DEPT[id]?.label || deptRooms[0].deptLabel),
         ...tally(deptRooms),
       }))
       .filter((dept) => dept.total > 0)
@@ -134,143 +206,303 @@ export default function Overview({
     const icu = tally(rooms.filter((room) => room.dept === "icu"));
     const ed = tally(rooms.filter((room) => room.dept === "ed" || room.dept === "trauma"));
     const or = tally(rooms.filter((room) => room.kind === "or"));
-    const flow = FLOW_BUCKETS.map((bucket) => ({
-      ...bucket,
-      value: movements.filter((item) => flowBucket(item.message) === bucket.id).length,
-    }));
+    const flow = Object.fromEntries(
+      FLOW_BUCKETS.map((bucket) => [
+        bucket.id,
+        movements.filter((item) => flowBucket(item.message) === bucket.id).length,
+      ]),
+    );
+    const staff = floors.map((floor) => {
+      const crew = hospital
+        .find((level) => level.id === floor.id)
+        ?.rooms.filter((room) => room.census && (room.physician || room.nurse)) || [];
+      const physicians = [...new Set(crew.map((room) => room.physician).filter(Boolean))];
+      const nurses = [...new Set(crew.map((room) => room.nurse).filter(Boolean))];
+      return { ...floor, physicians, nurses };
+    });
 
-    return { house, floors, departments, icu, ed, or, flow };
+    return { house, floors, departments, icu, ed, or, flow, staff };
   }, [hospital, movements]);
 
-  const icuDiverted = transfers.filter((item) => item.reason === "icu_full").length;
-  const orDiverted = transfers.filter((item) => item.reason === "or_full").length;
+  const [floorId, setFloorId] = useState(model.floors[0]?.id || "");
   const occupiedShare = pct(model.house.occupied, model.house.total);
+  const icuDiverted = transfers.filter((item) => item.reason === "icu_full").length;
+  const hottest = model.departments.find((dept) => pct(dept.occupied, dept.total) >= 85);
+
+  const metrics = [
+    { id: "occupancy", label: "Occupancy", value: occupiedShare, suffix: "%" },
+    { id: "available", label: "Available", value: model.house.available, suffix: "" },
+    { id: "occupied", label: "Occupied", value: model.house.occupied, suffix: "" },
+    { id: "critical", label: "Critical", value: model.house.critical, suffix: "", alert: true },
+    { id: "cleaning", label: "Cleaning", value: model.house.cleaning, suffix: "" },
+  ];
+
   const slices = [
-    { id: "critical", label: "Critical", value: model.house.critical, color: MIX.critical },
-    { id: "stable", label: "Stable", value: model.house.stable, color: MIX.stable },
-    { id: "cleaning", label: "Cleaning", value: model.house.cleaning, color: MIX.cleaning },
-    { id: "available", label: "Available", value: model.house.available, color: MIX.available },
+    { id: "critical", label: "Critical", value: model.house.critical, color: CRITICAL },
+    { id: "stable", label: "Stable", value: model.house.stable, color: STABLE },
+    { id: "available", label: "Available", value: model.house.available, color: OPEN, soft: "#c5ddd0" },
   ];
 
   return (
-    <div className="cmd">
-      <header className="cmd-top">
-        <div className="cmd-intro">
-          <p className="kicker">Hospital census</p>
+    <div className="ov">
+      <header className="ov-head">
+        <div>
           <h2>Tiger Memorial</h2>
-          <p>Live bed mix for every floor with patients. Open a floor to see it on the map.</p>
+          <p>Live bed mix for every floor. Open a floor to see it on the map.</p>
         </div>
-        <section className={surgeOn ? "cmd-banner is-hot" : "cmd-banner"} aria-label="Active incident">
-          <p className="kicker">{surgeOn ? "Surge declared" : "Active incident"}</p>
-          <strong>Train collision — MCI</strong>
-          <p>
-            {surgeOn
-              ? "Emergency on F1 and ICU on F3 are holding the incoming critical patients."
-              : "Rail incident. Emergency and ICU are the receiving units."}
-          </p>
-          <button type="button" className="surge-btn cmd-surge" onClick={onDeclareSurge} disabled={surgeOn}>
-            {surgeOn ? "Surge declared" : "Declare surge"}
-          </button>
-        </section>
+        <button type="button" className="ov-surge" onClick={onDeclareSurge} disabled={surgeOn}>
+          {surgeOn ? "Surge declared" : "Declare surge"}
+        </button>
       </header>
 
-      <section className="cmd-kpis" aria-label="Hospital totals">
-        <Kpi label="Occupancy" value={occupiedShare} suffix="%" note={`${model.house.occupied} of ${model.house.total} beds`} />
-        <Kpi label="Available" value={model.house.available} note="Open right now" />
-        <Kpi label="Occupied" value={model.house.occupied} note="Includes critical" />
-        <Kpi label="Critical" value={model.house.critical} note="Subset of occupied" live={model.house.critical > 0} />
-        <Kpi label="Cleaning" value={model.house.cleaning} note="Not free yet" />
-      </section>
+      <nav className="ov-tabs" aria-label="Census">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={tab === item.id ? "is-on" : ""}
+            aria-current={tab === item.id ? "page" : undefined}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
 
-      <section className="cmd-plots">
-        <article className="cmd-block">
-          <h3>Bed mix</h3>
-          <p className="overview-sub">Every census bed in the building.</p>
-          <MixBar slices={slices} total={model.house.total} />
-        </article>
-        <article className="cmd-block">
-          <h3>Occupancy by floor</h3>
-          <p className="overview-sub">Select a floor for the map.</p>
-          <FloorBullets floors={model.floors} onOpen={onOpenFloor} />
-        </article>
-      </section>
+      {tab === "overview" && (
+        <>
+          <section className="ov-metrics" aria-label="Hospital totals">
+            {metrics.map((metric) => (
+              <Metric key={metric.id} metric={metric} />
+            ))}
+          </section>
 
-      <section className="cmd-rings" aria-label="Receiving units">
-        <Ring label="Intensive Care" unit={model.icu} note={icuDiverted ? `${icuDiverted} diverted · ICU full` : "F3 receiving unit"} />
-        <Ring label="Emergency" unit={model.ed} note="F1 and trauma bays on F3" />
-        <Ring label="Operating rooms" unit={model.or} note={orDiverted ? `${orDiverted} diverted · ORs full` : "Both theatres on F3"} />
-      </section>
+          <section className="ov-split">
+            <article>
+              <h3>Bed mix <span>— every census bed in the building</span></h3>
+              <MixBar slices={slices} total={model.house.total} />
+            </article>
+            <article>
+              <div className="ov-floor-head">
+                <h3>Occupancy by floor <span>— threshold at 70 / 85%</span></h3>
+                <div className="ov-pills" role="group" aria-label="Floors">
+                  {model.floors.map((floor) => (
+                    <button
+                      key={floor.id}
+                      type="button"
+                      className={floor.id === floorId ? "is-on" : ""}
+                      aria-pressed={floor.id === floorId}
+                      onClick={() => setFloorId(floor.id)}
+                    >
+                      {floor.code}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <ul className="ov-floors">
+                {model.floors.map((floor) => {
+                  const share = pct(floor.occupied, floor.total);
+                  return (
+                    <li key={floor.id}>
+                      <button type="button" className={floor.id === floorId ? "is-on" : ""} onClick={() => onOpenFloor(floor.id)}>
+                        <span>{floor.code}</span>
+                        <Bullet share={share} />
+                        <strong>{share}%</strong>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </article>
+          </section>
 
-      <section className="cmd-plots">
-        <article className="cmd-block">
-          <h3>Departments</h3>
-          <p className="overview-sub">Share of beds in each unit, tightest first.</p>
-          <DeptBars rows={model.departments} />
-        </article>
-        <article className="cmd-block">
-          <h3>Movement mix</h3>
-          <p className="overview-sub">Admissions in. Discharges and diversions out.</p>
-          <Waterfall flow={model.flow} empty={movements.length === 0} />
-        </article>
-      </section>
+          <section className="ov-rings" aria-label="Receiving units">
+            <Ring
+              label="Intensive Care"
+              unit={model.icu}
+              note={icuDiverted
+                ? `${model.icu.occupied} of ${model.icu.total} in use · ${icuDiverted} diverted`
+                : `${model.icu.occupied} of ${model.icu.total} in use`}
+            />
+            <Ring label="Emergency" unit={model.ed} note={`${model.ed.occupied} of ${model.ed.total} in use`} />
+            <Ring label="Operating rooms" unit={model.or} note={`${model.or.occupied} of ${model.or.total} in use`} />
+          </section>
 
-      <article className="cmd-block">
-        <h3>Latest movements</h3>
-        <p className="overview-sub">Five most recent. The full log stays in Patient Flow.</p>
-        {movements.length === 0 ? (
-          <p className="cmd-empty">No movement yet. The census updates every few seconds.</p>
-        ) : (
-          <ul className="cmd-feed">
-            {movements.slice(0, 5).map((item) => (
-              <li key={item.id}>
-                {item.room_id ? (
-                  <button type="button" className="cmd-shift" onClick={() => onOpenMovement(item)}>
-                    <time>{clock(item.created_at)}</time>
-                    <span>{item.message}</span>
-                    <em>{item.room_id}</em>
-                  </button>
-                ) : (
-                  <div className="cmd-shift">
-                    <time>{clock(item.created_at)}</time>
-                    <span>{item.message}</span>
-                  </div>
-                )}
+          <section className="ov-split ov-bottom">
+            <article>
+              <h3>Departments <span>— tightest first</span></h3>
+              <ul className="ov-depts">
+                {model.departments.map((dept) => {
+                  const share = pct(dept.occupied, dept.total);
+                  return (
+                    <li key={dept.id} className={hottest?.id === dept.id ? "is-hot" : ""}>
+                      <span>{dept.label}</span>
+                      <i title={`${dept.occupied} occupied of ${dept.total}`}>
+                        <b style={{ width: `${(dept.critical / dept.total) * 100}%`, background: CRITICAL }} />
+                        <b style={{ width: `${(dept.stable / dept.total) * 100}%`, background: STABLE }} />
+                        <b style={{ width: `${((dept.total - dept.critical - dept.stable) / dept.total) * 100}%`, background: "#e6e3db" }} />
+                      </i>
+                      <strong>{share}%</strong>
+                    </li>
+                  );
+                })}
+              </ul>
+            </article>
+            <article>
+              <h3>Movement mix <span>— admissions in, discharges and diversions out</span></h3>
+              <Sankey
+                admit={model.flow.admit}
+                transfer={model.flow.move + model.flow.or}
+                discharge={model.flow.discharge}
+                divert={model.flow.divert}
+                turnover={model.flow.turnover}
+              />
+            </article>
+          </section>
+        </>
+      )}
+
+      {tab === "flow" && (
+        <section className="ov-panel">
+          <h3>Patient flow <span>— latest movement</span></h3>
+          {movements.length === 0 ? (
+            <p className="ov-empty">No movement yet. The census updates every few seconds.</p>
+          ) : (
+            <ul className="ov-feed">
+              {movements.map((item) => (
+                <li key={item.id}>
+                  {item.room_id ? (
+                    <button type="button" onClick={() => onOpenMovement(item)}>
+                      <time>{clock(item.created_at)}</time>
+                      <span>{item.message}</span>
+                      <em>{item.room_id}</em>
+                    </button>
+                  ) : (
+                    <div>
+                      <time>{clock(item.created_at)}</time>
+                      <span>{item.message}</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {tab === "staff" && (
+        <section className="ov-panel">
+          <h3>Staffing <span>— charge nurse and the crew on occupied beds</span></h3>
+          <ul className="ov-staff">
+            {model.staff.map((floor) => (
+              <li key={floor.id}>
+                <strong>{floor.code}</strong>
+                <span>{floor.charge || "No charge nurse"}</span>
+                <em>{floor.physicians.join(", ") || "—"}</em>
+                <small>{floor.nurses.join(", ") || "No nurses assigned"}</small>
               </li>
             ))}
           </ul>
-        )}
-      </article>
+        </section>
+      )}
+
+      {tab === "alerts" && (
+        <section className="ov-panel">
+          <h3>Alerts <span>— active incident</span></h3>
+          <p className="ov-alert">
+            {surgeOn
+              ? "Surge is declared. Emergency on F1 and ICU on F3 are holding the incoming critical patients."
+              : "Train collision. Emergency and ICU are the receiving units."}
+          </p>
+          {transfers.length === 0 ? (
+            <p className="ov-empty">No diversions yet.</p>
+          ) : (
+            <ul className="ov-feed">
+              {transfers.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <time>{item.patient_name}</time>
+                    <span>{item.destination}</span>
+                    <em>{item.reason === "icu_full" ? "ICU full" : "ORs full"}</em>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </div>
   );
 }
 
-function Kpi({ label, value, suffix = "", note, live = false }) {
-  const shown = useCount(value);
+function Metric({ metric }) {
+  const shown = useCount(metric.value);
+  const spec = SPARK[metric.id];
+  const delta = metricDelta(metric.id, metric.value);
+  const points = sparkPoints(metric.value, delta, spec.shape);
   return (
-    <div className={live ? "cmd-kpi is-live" : "cmd-kpi"}>
-      <span>{label}</span>
-      <strong>{shown}{suffix}</strong>
-      <small>{note}</small>
+    <div className={metric.alert ? "ov-metric is-alert" : "ov-metric"}>
+      <span>{metric.label}</span>
+      <p>
+        <strong>{shown}{metric.suffix}</strong>
+        <em style={{ color: delta ? spec.color : MUTED }}>{formatDelta(delta, spec.suffix)}</em>
+      </p>
+      <Sparkline points={points} color={spec.color} />
     </div>
+  );
+}
+
+function Sparkline({ points, color }) {
+  const ref = useRef(null);
+  const [length, setLength] = useState(120);
+  const [drawn, setDrawn] = useState(false);
+
+  useLayoutEffect(() => {
+    setDrawn(false);
+    setLength(ref.current?.getTotalLength() || 120);
+  }, [points]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(frame);
+  }, [points, length]);
+
+  return (
+    <svg className="ov-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
+      <polyline
+        ref={ref}
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+        style={{
+          strokeDasharray: length,
+          strokeDashoffset: drawn ? 0 : length,
+        }}
+      />
+    </svg>
   );
 }
 
 function MixBar({ slices, total }) {
+  const shown = slices.filter((slice) => slice.value > 0);
   return (
     <div>
-      <div className="cmd-mix" role="img" aria-label="Bed mix">
-        {slices.map((slice) => (
+      <div className="ov-mix" role="img" aria-label="Bed mix">
+        {shown.map((slice) => (
           total ? (
             <i
               key={slice.id}
-              className="cmd-fill"
-              style={{ width: `${(slice.value / total) * 100}%`, background: slice.color }}
+              style={{ width: `${(slice.value / total) * 100}%`, background: slice.soft || slice.color }}
               title={`${slice.label}: ${slice.value}`}
             />
           ) : null
         ))}
       </div>
-      <ul className="cmd-legend">
+      <ul className="ov-legend">
         {slices.map((slice) => (
           <li key={slice.id}>
             <i style={{ background: slice.color }} />
@@ -283,127 +515,191 @@ function MixBar({ slices, total }) {
   );
 }
 
-function FloorBullets({ floors, onOpen }) {
+function Bullet({ share }) {
+  const drawn = useDraw(share);
   return (
-    <ul className="cmd-bullets">
-      {floors.map((floor) => {
-        const share = pct(floor.occupied, floor.total);
-        return (
-          <li key={floor.id}>
-            <button type="button" onClick={() => onOpen(floor.id)}>
-              <span className="cmd-code">{floor.code}</span>
-              <span className="cmd-track">
-                <i className="cmd-mark" style={{ left: "70%" }} />
-                <i className="cmd-mark is-limit" style={{ left: "85%" }} />
-                <i className={`cmd-bar cmd-fill ${toneClass(share)}`} style={{ width: `${share}%` }} />
-              </span>
-              <strong>{share}%</strong>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <svg className="ov-bullet" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="0" y1="7" x2="100" y2="7" stroke="#e7e4dc" strokeWidth="7" strokeLinecap="butt" />
+      <line
+        x1="0"
+        y1="7"
+        x2="100"
+        y2="7"
+        stroke={barTone(share)}
+        strokeWidth="7"
+        strokeLinecap="butt"
+        pathLength="100"
+        style={{
+          strokeDasharray: 100,
+          strokeDashoffset: drawn ? 100 - share : 100,
+        }}
+      />
+      <line x1="70" y1="1" x2="70" y2="13" stroke={WATCH} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      <line x1="85" y1="1" x2="85" y2="13" stroke={CRITICAL} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
 function Ring({ label, unit, note }) {
   const open = useCount(unit.available);
   const share = pct(unit.occupied, unit.total);
-  const radius = 46;
+  const drawn = useDraw(share);
+  const radius = 42;
   const length = 2 * Math.PI * radius;
-  const drawn = (share / 100) * length;
+  const rest = length - (share / 100) * length;
+  const mark = (85 / 100) * length;
   return (
-    <article className="cmd-unit">
-      <p className="kicker">{label}</p>
-      <div className="cmd-ring-wrap">
-        <svg viewBox="0 0 120 120" className="cmd-ring" role="img" aria-label={`${label}, ${unit.available} open, ${share} percent occupied`}>
-          <circle cx="60" cy="60" r={radius} fill="none" stroke="#e6ebf2" strokeWidth="3" />
+    <article className="ov-ring">
+      <p>{label}</p>
+      <div>
+        <svg viewBox="0 0 120 120" role="img" aria-label={`${label}, ${unit.available} open`}>
+          <circle cx="60" cy="60" r={radius} fill="none" stroke={LINE} strokeWidth="3.5" />
           <circle
             cx="60"
             cy="60"
             r={radius}
             fill="none"
-            className={`cmd-ring-value ${toneClass(share)}`}
-            strokeWidth="3"
-            style={{ "--c": length, "--rest": length - drawn }}
+            stroke={barTone(share)}
+            strokeWidth="3.5"
+            strokeLinecap="butt"
+            style={{
+              strokeDasharray: length,
+              strokeDashoffset: drawn ? rest : length,
+            }}
+            transform="rotate(-90 60 60)"
+          />
+          <circle
+            cx="60"
+            cy="60"
+            r={radius}
+            fill="none"
+            stroke={WATCH}
+            strokeWidth="3.5"
+            strokeLinecap="butt"
+            style={{ strokeDasharray: `2 ${length}` , strokeDashoffset: length - mark }}
             transform="rotate(-90 60 60)"
           />
         </svg>
-        <div className="cmd-ring-read">
+        <div>
           <strong>{open}</strong>
-          <span>open</span>
+          <span>Open</span>
         </div>
       </div>
-      <p>{unit.occupied} of {unit.total} in use. {note}</p>
+      <small>{note}</small>
     </article>
   );
 }
 
-function DeptBars({ rows }) {
-  if (rows.length === 0) return <p className="cmd-empty">No census beds.</p>;
-  return (
-    <ul className="cmd-depts">
-      {rows.map((row) => {
-        const share = pct(row.occupied, row.total);
-        return (
-          <li key={row.id} className="cmd-shift">
-            <span>{row.label}</span>
-            <div className="cmd-stack" title={`${row.occupied} occupied of ${row.total}`}>
-              <i className="cmd-fill" style={{ width: `${(row.critical / row.total) * 100}%`, background: MIX.critical }} />
-              <i className="cmd-fill" style={{ width: `${(row.stable / row.total) * 100}%`, background: MIX.stable }} />
-              <i className="cmd-fill" style={{ width: `${(row.cleaning / row.total) * 100}%`, background: MIX.cleaning }} />
-              <i className="cmd-fill" style={{ width: `${(row.available / row.total) * 100}%`, background: MIX.available }} />
-            </div>
-            <strong>{share}%</strong>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function Waterfall({ flow, empty }) {
-  if (empty) return <p className="cmd-empty">No movement yet. The census updates every few seconds.</p>;
-  const count = (id) => flow.find((row) => row.id === id)?.value || 0;
-  const incoming = count("admit");
-  const inside = count("move") + count("or") + count("turnover");
-  const outgoing = count("discharge") + count("divert");
-  const peak = Math.max(incoming, inside, outgoing, 1);
-  const steps = [
-    {
-      id: "in",
-      label: "In",
-      amount: incoming,
-      sign: "+",
-      detail: `Admit ${incoming}`,
-    },
-    {
-      id: "mid",
-      label: "Inside",
-      amount: inside,
-      sign: "",
-      detail: `Transfer ${count("move")} · OR ${count("or")} · Turnover ${count("turnover")}`,
-    },
-    {
-      id: "out",
-      label: "Out",
-      amount: outgoing,
-      sign: "−",
-      detail: `Discharge ${count("discharge")} · Divert ${count("divert")}`,
-    },
+function Sankey({ admit, transfer, discharge, divert, turnover }) {
+  const height = 168;
+  const top = 18;
+  const band = height - 36;
+  const leftItems = [
+    { id: "admit", label: "Admit", value: admit, color: "#8ea4b4" },
+    { id: "transfer", label: "Transfer", value: transfer, color: "#d7b56a" },
   ];
+  const rightItems = [
+    { id: "discharge", label: "Discharge", value: discharge, color: "#8ea4b4" },
+    { id: "divert", label: "Divert", value: divert, color: "#d7b56a" },
+    { id: "turnover", label: "Turnover", value: turnover, color: "#9dbeae" },
+  ];
+  const layout = useMemo(() => buildSankey(leftItems, rightItems, top, band), [admit, transfer, discharge, divert, turnover, band]);
+  const x1 = 168;
+  const x2 = 318;
+
   return (
-    <div className="cmd-fall" role="img" aria-label="Patient flow, admissions in, discharges and diversions out">
-      {steps.map((step) => (
-        <div key={step.id} className={`cmd-fall-step is-${step.id}`}>
-          <span className="kicker">{step.label}</span>
-          <div className="cmd-fall-plot">
-            <i className="cmd-fill" style={{ height: `${Math.max((step.amount / peak) * 100, step.amount ? 6 : 0)}%` }} />
-          </div>
-          <strong>{step.sign}{step.amount}</strong>
-          <small>{step.detail}</small>
-        </div>
+    <div className="ov-sankey" style={{ height }}>
+      <svg viewBox={`0 0 480 ${height}`} role="img" aria-label="Patient movement from admit and transfer to discharge, divert, and turnover">
+        {layout.links.map((link) => (
+          <path key={`${link.from}-${link.to}`} d={ribbon(x1 + 8, link.y1a, link.y1b, x2, link.y2a, link.y2b)} fill={link.color} opacity="0.9" />
+        ))}
+        <rect x={x1} y={layout.leftTop} width="8" height={layout.leftHeight} fill={INK} />
+        <rect x={x2} y={layout.rightTop} width="8" height={layout.rightHeight} fill={INK} />
+      </svg>
+      {layout.left.filter((item) => item.value > 0).map((item) => (
+        <span key={item.id} className="is-left" style={{ top: `${((item.y0 + item.y1) / 2 / height) * 100}%` }}>
+          {item.label} <b>{item.value}</b>
+        </span>
+      ))}
+      {layout.right.filter((item) => item.value > 0).map((item) => (
+        <span key={item.id} className="is-right" style={{ top: `${((item.y0 + item.y1) / 2 / height) * 100}%` }}>
+          {item.label} <b>{item.value}</b>
+        </span>
       ))}
     </div>
   );
+}
+
+function placeBands(items, top, height) {
+  const active = items.some((item) => item.value > 0)
+    ? items.filter((item) => item.value > 0)
+    : items.map((item) => ({ ...item, value: 1, ghost: true }));
+  const gap = active.length > 1 ? 5 : 0;
+  const usable = height - gap * (active.length - 1);
+  const total = active.reduce((sum, item) => sum + item.value, 0) || 1;
+  let y = top;
+  const bands = active.map((item) => {
+    const span = Math.max((item.value / total) * usable, 8);
+    const band = { ...item, y0: y, y1: y + span, value: item.ghost ? 0 : item.value };
+    y += span + gap;
+    return band;
+  });
+  const missing = items.filter((item) => !bands.some((band) => band.id === item.id));
+  return { bands, missing };
+}
+
+function buildSankey(leftItems, rightItems, top, height) {
+  const left = placeBands(leftItems, top, height);
+  const right = placeBands(rightItems, top, height);
+  const links = [];
+  const sources = left.bands.filter((item) => item.value > 0);
+  const sinks = right.bands.filter((item) => item.value > 0);
+  if (sources.length && sinks.length) {
+    let sinkIndex = 0;
+    let sinkRemain = sinks[0].value;
+    const sinkCursor = Object.fromEntries(sinks.map((item) => [item.id, item.y0]));
+    const sourceCursor = Object.fromEntries(sources.map((item) => [item.id, item.y0]));
+    sources.forEach((source) => {
+      let remain = source.value;
+      while (remain > 0.001 && sinkIndex < sinks.length) {
+        const sink = sinks[sinkIndex];
+        const take = Math.min(remain, sinkRemain);
+        const sourceSpan = source.y1 - source.y0;
+        const sinkSpan = sink.y1 - sink.y0;
+        const y1a = sourceCursor[source.id];
+        const y2a = sinkCursor[sink.id];
+        const y1b = y1a + (take / source.value) * sourceSpan;
+        const y2b = y2a + (take / sink.value) * sinkSpan;
+        links.push({ from: source.id, to: sink.id, color: sink.color, y1a, y1b, y2a, y2b });
+        sourceCursor[source.id] = y1b;
+        sinkCursor[sink.id] = y2b;
+        remain -= take;
+        sinkRemain -= take;
+        if (sinkRemain <= 0.001) {
+          sinkIndex += 1;
+          sinkRemain = sinks[sinkIndex]?.value || 0;
+        }
+      }
+    });
+  }
+  const spanOf = (bands) => {
+    if (!bands.length) return { top, height: 8 };
+    return { top: bands[0].y0, height: bands[bands.length - 1].y1 - bands[0].y0 };
+  };
+  const leftSpan = spanOf(left.bands);
+  const rightSpan = spanOf(right.bands);
+  return {
+    left: [...left.bands, ...left.missing.map((item, index) => ({ ...item, y0: leftSpan.top + leftSpan.height + 16 + index * 16, y1: leftSpan.top + leftSpan.height + 28 + index * 16 }))],
+    right: [...right.bands, ...right.missing.map((item, index) => ({ ...item, y0: rightSpan.top + rightSpan.height + 16 + index * 18, y1: rightSpan.top + rightSpan.height + 28 + index * 18 }))],
+    links,
+    leftTop: leftSpan.top,
+    leftHeight: leftSpan.height,
+    rightTop: rightSpan.top,
+    rightHeight: rightSpan.height,
+  };
+}
+
+function ribbon(x1, y1a, y1b, x2, y2a, y2b) {
+  const mid = (x1 + x2) / 2;
+  return `M ${x1} ${y1a} C ${mid} ${y1a}, ${mid} ${y2a}, ${x2} ${y2a} L ${x2} ${y2b} C ${mid} ${y2b}, ${mid} ${y1b}, ${x1} ${y1b} Z`;
 }

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
+import Capacity from "./Capacity";
 import Overview from "./Overview";
 import {
   BUILDING,
@@ -302,7 +303,7 @@ export default function CommandCenter() {
     setHover(null);
     setNote(null);
     setFitToken((token) => token + 1);
-    if (nav !== "incidents" && nav !== "flow") setNav("live");
+    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity") setNav("live");
   }
 
   function openHit(hit) {
@@ -319,11 +320,11 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    if (nav === "overview" && id !== "overview") {
-      setFitToken((token) => token + 1);
-    }
+    const onBoard = nav === "overview" || nav === "capacity";
+    const stayingBoard = id === "overview" || id === "capacity";
+    if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
     setNav(id);
-    if (id === "incidents" || id === "flow" || id === "overview") {
+    if (id === "incidents" || id === "flow" || id === "overview" || id === "capacity") {
       setNote(null);
       return;
     }
@@ -578,6 +579,22 @@ export default function CommandCenter() {
         </aside>
 
         <main className="stage">
+          {nav === "capacity" && (
+            <Capacity
+              hospital={hospital}
+              surgeOn={surgeOn}
+              activeFloorId={floor.id}
+              onOpenFloor={(id) => {
+                setFloorId(id);
+                setSelectedId(null);
+                setHover(null);
+                setNote(null);
+                setElevatorOpen(false);
+                setNav("live");
+                setFitToken((token) => token + 1);
+              }}
+            />
+          )}
           {nav === "overview" && (
             <Overview
               hospital={hospital}
@@ -597,7 +614,7 @@ export default function CommandCenter() {
               onDeclareSurge={declareSurge}
             />
           )}
-          {nav !== "overview" && (
+          {nav !== "overview" && nav !== "capacity" && (
           <div
             ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
