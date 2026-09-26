@@ -52,79 +52,83 @@ function Icon({ name }) {
   if (name === "map") {
     return (
       <svg {...common}>
-        <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z" />
-        <path d="M9 3v15M15 6v15" />
+        <path d="M4 6.5 9.2 4l5.6 2.4L20 4.2V17.5l-5.2 2.3-5.6-2.4L4 19.6V6.5z" />
+        <path d="M9.2 4v13.4M14.8 6.4V19.8" />
       </svg>
     );
   }
   if (name === "grid") {
     return (
       <svg {...common}>
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
+        <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
+        <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
+        <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" />
       </svg>
     );
   }
   if (name === "bed") {
     return (
       <svg {...common}>
-        <path d="M3 18V8m0 6h18v4M7 10h6a3 3 0 0 1 3 3" />
+        <path d="M3 18V9.5A1.5 1.5 0 0 1 4.5 8H8a2.5 2.5 0 0 1 2.5 2.5V13" />
+        <path d="M3 13h18v5M3 18h18" />
+        <path d="M21 18v-5.5A2.5 2.5 0 0 0 18.5 10H10" />
       </svg>
     );
   }
   if (name === "flow") {
     return (
       <svg {...common}>
-        <path d="M4 7h11M4 12h16M4 17h9" />
+        <path d="M4 7h16M4 12h16M4 17h16" />
       </svg>
     );
   }
   if (name === "plug") {
     return (
       <svg {...common}>
-        <path d="M9 7v4M15 7v4M7 11h10v3a5 5 0 0 1-10 0v-3z" />
+        <path d="M12 7v5" />
+        <path d="M7.5 9.2a6.2 6.2 0 1 0 9 0" />
       </svg>
     );
   }
   if (name === "broom") {
     return (
       <svg {...common}>
-        <path d="M14 4l6 6M4 20l8-8 3 3-8 8H4v-3z" />
+        <path d="M12 20h7" />
+        <path d="m14.6 6.2 3.2 3.2" />
+        <path d="M16.4 3.4a1.9 1.9 0 0 1 2.7 2.7L8.4 17 4 18.2 5.2 14 16.4 3.4z" />
       </svg>
     );
   }
   if (name === "users") {
     return (
       <svg {...common}>
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="3" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 4.13a3 3 0 0 1 0 5.75" />
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5.2 20v-1.1A4.8 4.8 0 0 1 10 14.1h4a4.8 4.8 0 0 1 4.8 4.8V20" />
       </svg>
     );
   }
   if (name === "alert") {
     return (
       <svg {...common}>
-        <path d="M12 3l9 16H3L12 3z" />
-        <path d="M12 9v5M12 17h.01" />
+        <path d="M12 4 20.5 19h-17L12 4z" />
+        <path d="M12 10v4.2M12 17.2h.01" />
       </svg>
     );
   }
   if (name === "chart") {
     return (
       <svg {...common}>
-        <path d="M4 19V5M4 19h16" />
-        <path d="M8 16v-5M12 16V8M16 16v-3" />
+        <path d="M5 19V5M5 19h14" />
+        <path d="M9 16v-4M13 16V8M17 16v-2" />
       </svg>
     );
   }
   if (name === "gear") {
     return (
       <svg {...common}>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" />
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 2.8v2.2M12 19v2.2M2.8 12h2.2M19 12h2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6" />
       </svg>
     );
   }
@@ -190,6 +194,7 @@ export default function CommandCenter() {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [nav, setNav] = useState("live");
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [note, setNote] = useState(null);
   const [elevatorOpen, setElevatorOpen] = useState(false);
   const [surgeOn, setSurgeOn] = useState(false);
@@ -318,6 +323,14 @@ export default function CommandCenter() {
   });
   const rightOpen = Boolean(selected) || nav === "incidents" || Boolean(note);
 
+  function placeNavTip(event) {
+    const tip = event.currentTarget.querySelector(".nav-tip");
+    if (!tip) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    tip.style.top = `${rect.top + rect.height / 2}px`;
+    tip.style.left = `${rect.right + 14}px`;
+  }
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -387,32 +400,69 @@ export default function CommandCenter() {
         </div>
       </header>
 
-      <div className="workspace">
-        <aside className="nav">
-          {NAV.map((item) => (
+      <div className={navCollapsed ? "workspace is-slim" : "workspace"}>
+        <aside className={navCollapsed ? "nav is-collapsed" : "nav"}>
+          <div className="nav-head">
+            <span className="nav-mark" aria-hidden="true">
+              +
+            </span>
+            <strong>Tiger</strong>
             <button
-              key={item.id}
               type="button"
-              className={nav === item.id ? "nav-btn is-on" : "nav-btn"}
-              onClick={() => chooseNav(item.id)}
+              className="nav-collapse"
+              aria-label={navCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+              aria-expanded={!navCollapsed}
+              onClick={() => setNavCollapsed((open) => !open)}
             >
-              <Icon name={item.icon} />
-              <span>{item.label}</span>
-              {item.id === "incidents" && <em className="nav-badge">{badge}</em>}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d={navCollapsed ? "M8 6l5 6-5 6M13 6l5 6-5 6" : "M16 6l-5 6 5 6M11 6l-5 6 5 6"}
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
-          ))}
+          </div>
 
-          <div className="stack-block">
-            <p>Elevator</p>
-            <div className="stack">
+          <div className="nav-list">
+            {NAV.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={nav === item.id ? "nav-btn is-on" : "nav-btn"}
+                onClick={() => chooseNav(item.id)}
+                onMouseEnter={placeNavTip}
+                onFocus={placeNavTip}
+              >
+                <Icon name={item.icon} />
+                <span className="nav-label">{item.label}</span>
+                {item.id === "incidents" && <em className="nav-badge">{badge}</em>}
+                <span className="nav-tip">{item.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="campus">
+            <div className="campus-copy">
+              <img src="/main-hospital.jpg" alt="Main Hospital" />
+              <strong>Main Hospital</strong>
+            </div>
+            <div className="campus-floors" role="group" aria-label="Floors">
               {hospital.map((level) => (
                 <button
                   key={level.id}
                   type="button"
-                  className={level.id === floor.id ? "stack-btn is-on" : "stack-btn"}
+                  className={level.id === floor.id ? "floor-chip is-on" : "floor-chip"}
+                  aria-pressed={level.id === floor.id}
+                  aria-label={level.name}
                   onClick={() => goToFloor(level.id)}
+                  onMouseEnter={placeNavTip}
+                  onFocus={placeNavTip}
                 >
                   {level.code}
+                  <span className="nav-tip">{level.name}</span>
                 </button>
               ))}
             </div>
