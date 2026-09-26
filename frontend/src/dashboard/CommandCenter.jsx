@@ -24,7 +24,6 @@ const NAV = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "capacity", label: "Capacity", icon: "bed" },
   { id: "flow", label: "Patient Flow", icon: "flow" },
-  { id: "equipment", label: "Equipment", icon: "plug" },
   { id: "turnover", label: "Bed turnover", icon: "broom" },
   { id: "staff", label: "Staff", icon: "users" },
   { id: "incidents", label: "Incidents", icon: "alert" },
@@ -65,7 +64,6 @@ const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
   flow: "Every admit, floor move, OR case, discharge, and diversion.",
-  equipment: "Monitors, vents, and pumps sit on the selected bed. Pick a room to read them.",
   turnover: "Purple beds are in cleaning. They are not free until housekeeping marks them ready.",
   staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
   reports: "Reports stay off this demo. The live plate is the operational view.",
@@ -116,14 +114,6 @@ function Icon({ name }) {
     return (
       <svg {...common}>
         <path d="M4 7h16M4 12h16M4 17h16" />
-      </svg>
-    );
-  }
-  if (name === "plug") {
-    return (
-      <svg {...common}>
-        <path d="M12 7v5" />
-        <path d="M7.5 9.2a6.2 6.2 0 1 0 9 0" />
       </svg>
     );
   }
@@ -185,30 +175,6 @@ function Icon({ name }) {
     );
   }
   return null;
-}
-
-function equipmentFor(room) {
-  if (!room?.census) return [];
-  const busy = room.status === "critical" || room.status === "warning" || room.status === "normal";
-  const rows = [
-    { name: "Patient monitor", state: room.status === "cleaning" ? "Cleaning" : "Operational" },
-    { name: "Infusion pump", state: room.status === "cleaning" ? "Cleaning" : "Operational" },
-    { name: "Bedside oxygen", state: "Operational" },
-  ];
-  if (room.dept === "icu" || room.dept === "trauma" || room.status === "critical") {
-    rows.splice(1, 0, {
-      name: "Ventilator",
-      state: busy ? "Operational" : "Standby",
-    });
-  }
-  if (room.kind === "or") {
-    return [
-      { name: "Anesthesia machine", state: room.status === "available" ? "Standby" : "Operational" },
-      { name: "Surgical table", state: "Operational" },
-      { name: "Overhead lights", state: "Operational" },
-    ];
-  }
-  return rows;
 }
 
 function Stat({ tone, label, value }) {
@@ -871,7 +837,6 @@ export default function CommandCenter() {
 }
 
 function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
-  const gear = equipmentFor(room);
   const critical = deptBeds.filter((item) => item.status === "critical").length;
   const available = deptBeds.filter((item) => item.status === "available").length;
   return (
@@ -907,7 +872,7 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
       </div>
 
       <div className="tabs">
-        {["overview", "patients", "equipment", "history"].map((item) => (
+        {["overview", "patients", "history"].map((item) => (
           <button
             key={item}
             type="button"
@@ -989,18 +954,6 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
             <p>No patient in this space. {room.census ? "The bed is open for assignment." : "This room is not an inpatient bed."}</p>
           )}
         </div>
-      )}
-
-      {tab === "equipment" && (
-        <ul className="equip">
-          {gear.length === 0 && <li>No bedside devices in this room.</li>}
-          {gear.map((item) => (
-            <li key={item.name}>
-              <span>{item.name}</span>
-              <strong className={item.state === "Operational" ? "ok" : "warn"}>{item.state}</strong>
-            </li>
-          ))}
-        </ul>
       )}
 
       {tab === "history" && (
