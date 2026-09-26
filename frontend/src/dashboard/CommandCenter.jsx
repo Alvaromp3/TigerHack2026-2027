@@ -14,6 +14,7 @@ import {
   findRooms,
   summarize,
 } from "./floors";
+import { apiUrl } from "../api/client";
 import { roomVisualSrc } from "./roomVisuals";
 import "./dashboard.css";
 import logo from "./logo.png";
@@ -266,9 +267,9 @@ export default function CommandCenter() {
     async function pull() {
       try {
         const [censusRes, transferRes, flowRes] = await Promise.all([
-          fetch("/api/census"),
-          fetch("/api/transfers"),
-          fetch("/api/flow"),
+          fetch(apiUrl("/api/census")),
+          fetch(apiUrl("/api/transfers")),
+          fetch(apiUrl("/api/flow")),
         ]);
         if (stop) return;
         if (censusRes.ok) {
@@ -388,7 +389,7 @@ export default function CommandCenter() {
   async function declareSurge() {
     if (surgeOn) return;
     try {
-      const res = await fetch("/api/surge", { method: "POST" });
+      const res = await fetch(apiUrl("/api/surge"), { method: "POST" });
       if (!res.ok) return;
       const data = await res.json();
       setHospital((current) => applyCensus(current, data.rooms));
