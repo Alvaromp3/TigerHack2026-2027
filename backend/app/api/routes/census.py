@@ -23,6 +23,9 @@ def _room_payload(room: Room):
         "needs_or": patient.needs_or if patient else False,
         "physician": patient.physician if patient else None,
         "nurse": patient.nurse if patient else None,
+        "age": patient.age if patient else None,
+        "chief_complaint": patient.chief_complaint if patient else None,
+        "diagnosis": patient.diagnosis if patient else None,
     }
 
 
@@ -71,6 +74,7 @@ def flow(db: Session = Depends(get_db)):
                 "id": row.id,
                 "patient_name": row.patient_name,
                 "message": row.message,
+                "kind": row.kind,
                 "room_id": row.room_id,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }

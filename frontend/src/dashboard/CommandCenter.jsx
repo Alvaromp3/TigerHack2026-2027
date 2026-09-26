@@ -959,6 +959,9 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, onClose }) {
           {room.patient ? (
             <>
               <div className="meta-row"><span>Patient</span><strong>{room.patient}</strong></div>
+              {room.age != null && <div className="meta-row"><span>Age</span><strong>{room.age}</strong></div>}
+              {room.chief_complaint && <div className="meta-row"><span>Complaint</span><strong>{room.chief_complaint}</strong></div>}
+              {room.diagnosis && <div className="meta-row"><span>Diagnosis</span><strong>{room.diagnosis}</strong></div>}
               <div className="meta-row"><span>Acuity</span><strong>{STATUS[room.status].label}</strong></div>
               <div className="meta-row"><span>Attending</span><strong>{room.physician}</strong></div>
               <div className="meta-row"><span>Nurse</span><strong>{room.nurse}</strong></div>

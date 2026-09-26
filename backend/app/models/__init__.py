@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -31,6 +31,9 @@ class Patient(Base):
     needs_or: Mapped[bool] = mapped_column(Boolean, default=False)
     physician: Mapped[str] = mapped_column(String(80))
     nurse: Mapped[str] = mapped_column(String(80))
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chief_complaint: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    diagnosis: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
     room: Mapped[Room] = relationship(back_populates="patient")
 
@@ -41,6 +44,7 @@ class FlowEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     patient_name: Mapped[str] = mapped_column(String(80))
     message: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(16), default="move", server_default="move")
     room_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -52,6 +56,17 @@ class Transfer(Base):
     patient_name: Mapped[str] = mapped_column(String(80))
     destination: Mapped[str] = mapped_column(String(80))
     reason: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Death(Base):
+    __tablename__ = "deaths"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    patient_name: Mapped[str] = mapped_column(String(80))
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diagnosis: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    room_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

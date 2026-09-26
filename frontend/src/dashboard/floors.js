@@ -530,6 +530,9 @@ export function applyCensus(hospital, rooms) {
         patient: occupied ? live.patient : null,
         physician: occupied ? live.physician : null,
         nurse: occupied ? live.nurse : null,
+        age: occupied ? live.age : null,
+        chief_complaint: occupied ? live.chief_complaint : null,
+        diagnosis: occupied ? live.diagnosis : null,
       };
     }),
   }));
