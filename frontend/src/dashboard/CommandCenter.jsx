@@ -72,6 +72,52 @@ const NOTES = {
   three: "3D is off. This command view is the measured 2D plate.",
 };
 
+const DEFAULT_INCIDENTS = [
+  {
+    id: "INC-241",
+    roomId: "ED-T1",
+    title: "ER trauma bay blocked for imaging downtime",
+    severity: "high",
+    status: "open",
+    createdAt: "2026-09-26T08:00:00Z",
+  },
+  {
+    id: "INC-189",
+    roomId: "ICU-301",
+    title: "ICU bed held for engineering inspection",
+    severity: "medium",
+    status: "resolved",
+    createdAt: "2026-09-25T15:22:00Z",
+  },
+];
+
+function applyIncidentState(hospital, incidents) {
+  const openIncidents = new Map(
+    incidents
+      .filter((incident) => incident.status === "open")
+      .map((incident) => [incident.roomId, incident]),
+  );
+
+  return hospital.map((floor) => ({
+    ...floor,
+    rooms: floor.rooms.map((room) => {
+      const incident = openIncidents.get(room.id);
+      if (!incident) {
+        return room.status === "blocked" ? { ...room, status: room._incidentBaseline || "available", _incidentBaseline: null, incidentId: null, incidentTitle: null } : room;
+      }
+
+      const baseline = room._incidentBaseline || room.status;
+      return {
+        ...room,
+        status: "blocked",
+        _incidentBaseline: baseline,
+        incidentId: incident.id,
+        incidentTitle: incident.title,
+      };
+    }),
+  }));
+}
+
 function Icon({ name }) {
   const common = {
     width: 20,
@@ -286,7 +332,8 @@ function Stat({ tone, label, value }) {
 }
 
 export default function CommandCenter() {
-  const [hospital, setHospital] = useState(() => buildHospital());
+  const [hospital, setHospital] = useState(() => applyIncidentState(buildHospital(), DEFAULT_INCIDENTS));
+  const [incidents, setIncidents] = useState(DEFAULT_INCIDENTS);
   const [floorId, setFloorId] = useState("F1");
   const [selectedId, setSelectedId] = useState("ED-T1");
   const [hover, setHover] = useState(null);
@@ -310,6 +357,8 @@ export default function CommandCenter() {
   const [zoom, setZoom] = useState(1.25);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fitToken, setFitToken] = useState(0);
+  const [incidentTitle, setIncidentTitle] = useState("");
+  const [incidentSeverity, setIncidentSeverity] = useState("high");
   const mapRef = useRef(null);
   const sfxRef = useRef(null);
   const knownFlow = useRef(null);
@@ -323,6 +372,8 @@ export default function CommandCenter() {
   const summary = useMemo(() => summarize(floor), [floor]);
   const selected = floor.rooms.find((room) => room.id === selectedId) || null;
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
+  const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
+  const resolvedIncidents = useMemo(() => incidents.filter((item) => item.status === "resolved").slice(0, 3), [incidents]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -484,6 +535,69 @@ export default function CommandCenter() {
     setNote(NOTES[id]);
   }
 
+  function reportIncident() {
+    const targetRoomId = selectedId || floor.rooms.find((room) => room.census)?.id || "ED-T1";
+    const title = incidentTitle.trim() || `${targetRoomId} needs engineering review`;
+
+    setIncidents((current) => [
+      {
+        id: `INC-${Date.now()}`,
+        roomId: targetRoomId,
+        title,
+        severity: incidentSeverity,
+        status: "open",
+        createdAt: new Date().toISOString(),
+      },
+      ...current,
+    ]);
+
+    setHospital((current) => current.map((level) => ({
+      ...level,
+      rooms: level.rooms.map((room) => {
+        if (room.id !== targetRoomId) return room;
+        const baseline = room._incidentBaseline || room.status;
+        return {
+          ...room,
+          status: "blocked",
+          _incidentBaseline: baseline,
+          incidentId: `INC-${Date.now()}`,
+          incidentTitle: title,
+        };
+      }),
+    })));
+
+    setSelectedId(targetRoomId);
+    setNav("incidents");
+    setIncidentTitle("");
+    setToast(`${targetRoomId} is now blocked until resolved.`);
+  }
+
+  function resolveIncident(incidentId) {
+    const incident = incidents.find((item) => item.id === incidentId);
+    if (!incident) return;
+
+    setIncidents((current) => current.map((item) => (
+      item.id === incidentId ? { ...item, status: "resolved" } : item
+    )));
+
+    setHospital((current) => current.map((level) => ({
+      ...level,
+      rooms: level.rooms.map((room) => {
+        if (room.id !== incident.roomId) return room;
+        const nextStatus = room._incidentBaseline || "available";
+        return {
+          ...room,
+          status: nextStatus,
+          _incidentBaseline: null,
+          incidentId: null,
+          incidentTitle: null,
+        };
+      }),
+    })));
+
+    setToast(`${incident.roomId} is available again.`);
+  }
+
   async function declareSurge() {
     if (surgeOn) return;
     try {
@@ -564,7 +678,7 @@ export default function CommandCenter() {
     day: "numeric",
     year: "numeric",
   });
-  const rightOpen = Boolean(selected) || nav === "incidents" || Boolean(note);
+  const rightOpen = Boolean(selected) || Boolean(note);
 
   function openMovement(event) {
     if (!event.room_id) return;
@@ -784,7 +898,111 @@ export default function CommandCenter() {
               onOpenMovement={openMovement}
             />
           )}
-          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && (
+          {nav === "incidents" && (
+            <div className="incidents-page">
+              <div className="incident incident-panel">
+                <div className="detail-head">
+                  <div>
+                    <p className="kicker">Operations</p>
+                    <h2>Incidents</h2>
+                  </div>
+                </div>
+
+                <div className="incidents-cols">
+                  <div className="incidents-col incidents-col-form">
+                    <div className="incident-form">
+                      <label>
+                        <span>Room</span>
+                        <strong>{selectedId || "ED-T1"}</strong>
+                      </label>
+                      <label>
+                        <span>Issue</span>
+                        <input
+                          value={incidentTitle}
+                          onChange={(event) => setIncidentTitle(event.target.value)}
+                          placeholder="Describe the blockage"
+                        />
+                      </label>
+                      <label>
+                        <span>Severity</span>
+                        <select value={incidentSeverity} onChange={(event) => setIncidentSeverity(event.target.value)}>
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                      </label>
+                      <button type="button" className="surge-btn" onClick={reportIncident}>
+                        Report incident
+                      </button>
+                    </div>
+
+                    <button type="button" className="surge-btn" onClick={declareSurge} disabled={surgeOn}>
+                      {surgeOn ? "Surge declared" : "Declare surge"}
+                    </button>
+                    {surgeOn && (
+                      <p className="surge-note">
+                        Receiving units updated. Ride the elevator to F1 or F3 to see the beds turn critical.
+                      </p>
+                    )}
+                    {transfers.length > 0 && (
+                      <ul className="activity">
+                        {transfers.slice(0, 4).map((item) => (
+                          <li key={item.id}>
+                            <strong>{item.destination}</strong>
+                            <span>{item.patient_name}</span>
+                            <em>{item.reason === "icu_full" ? "ICU full" : "ORs full"}</em>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="incidents-col incidents-col-list">
+                    <div className="incident-section">
+                      <p className="kicker">Open</p>
+                      {openIncidents.length === 0 ? (
+                        <p className="detail-copy">No active incidents on the floor.</p>
+                      ) : (
+                        <ul className="incident-list">
+                          {openIncidents.map((item) => (
+                            <li key={item.id} className="incident-row">
+                              <div className="incident-row-head">
+                                <strong>{item.roomId}</strong>
+                                <span className={`severity severity-${item.severity}`}>{item.severity}</span>
+                              </div>
+                              <p>{item.title}</p>
+                              <div className="incident-row-meta">
+                                <small>{new Date(item.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</small>
+                                <button type="button" onClick={() => resolveIncident(item.id)}>Resolve</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div className="incident-section">
+                      <p className="kicker">Recent</p>
+                      <ul className="incident-list compact">
+                        {resolvedIncidents.length === 0 && <li className="detail-copy">No recent closures.</li>}
+                        {resolvedIncidents.map((item) => (
+                          <li key={item.id} className="incident-row resolved">
+                            <div className="incident-row-head">
+                              <strong>{item.roomId}</strong>
+                              <span className="severity resolved-tag">Resolved</span>
+                            </div>
+                            <p>{item.title}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && (
           <div
             ref={mapRef}
             className={rightOpen ? "map-stage has-detail" : "map-stage"}
@@ -880,44 +1098,7 @@ export default function CommandCenter() {
 
             {rightOpen && (
               <aside className="detail">
-                {nav === "incidents" && (
-                  <div className="incident">
-                    <div className="detail-head">
-                      <div>
-                        <p className="kicker">Active incident</p>
-                        <h2>Train collision — MCI</h2>
-                      </div>
-                      <button type="button" className="icon-btn" onClick={() => setNav("live")} aria-label="Close">
-                        ×
-                      </button>
-                    </div>
-                    <p>
-                      A rail incident is sending critical patients here. Surge holds every open bed in
-                      the Emergency Department on F1 and the ICU on F3.
-                    </p>
-                    <button type="button" className="surge-btn" onClick={declareSurge} disabled={surgeOn}>
-                      {surgeOn ? "Surge declared" : "Declare surge"}
-                    </button>
-                    {surgeOn && (
-                      <p className="surge-note">
-                        Receiving units updated. Ride the elevator to F1 or F3 to see the beds turn critical.
-                      </p>
-                    )}
-                    {transfers.length > 0 && (
-                      <ul className="activity">
-                        {transfers.slice(0, 4).map((item) => (
-                          <li key={item.id}>
-                            <strong>{item.destination}</strong>
-                            <span>{item.patient_name}</span>
-                            <em>{item.reason === "icu_full" ? "ICU full" : "ORs full"}</em>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-
-                {nav !== "incidents" && note && (
+                {note && (
                   <div className="incident">
                     <div className="detail-head">
                       <h2>{nav === "staff" ? "Staff" : "Live map"}</h2>
@@ -942,7 +1123,7 @@ export default function CommandCenter() {
                   </div>
                 )}
 
-                {nav !== "incidents" && !note && selected && (
+                {!note && selected && (
                   <RoomCard
                     room={selected}
                     floor={floor}

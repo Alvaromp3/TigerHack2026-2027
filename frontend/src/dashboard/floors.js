@@ -51,6 +51,7 @@ export const STATUS = {
   normal: { label: "Normal", color: "#3f9142" },
   available: { label: "Available", color: "#2f8f86" },
   cleaning: { label: "Cleaning", color: "#6b7db5" },
+  blocked: { label: "Blocked", color: "#7c3aed" },
 };
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
