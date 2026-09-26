@@ -102,6 +102,7 @@ function evaluateDirective(model, surgeOn) {
     };
   }
 
+  // THIS WAS MISSING: We must define these variables so the if statements below work
   const ed = model.units.find((u) => u.id === "ed");
   const icu = model.units.find((u) => u.id === "icu");
   const or = model.units.find((u) => u.id === "or");
@@ -253,7 +254,7 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
     const orRooms = rooms.filter((room) => room.kind === "or");
     const surgeBeds = (list) => list.filter((room) => room.census && room.surge && room.status === "available").length;
 
-    return {
+return {
       house,
       floors,
       departments,
@@ -261,21 +262,21 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
         {
           id: "icu",
           label: "Intensive Care",
-          where: codesFor(hospital, (room) => room.dept === "icu").join(" · ") || "—",
+          floors: codesFor(hospital, (room) => room.dept === "icu"),
           ...tally(icuRooms),
           surge: surgeBeds(icuRooms),
         },
         {
           id: "ed",
           label: "Emergency",
-          where: codesFor(hospital, (room) => room.dept === "ed" || room.dept === "trauma").join(" · ") || "—",
+          floors: codesFor(hospital, (room) => room.dept === "ed" || room.dept === "trauma"),
           ...tally(edRooms),
           surge: surgeBeds(edRooms),
         },
         {
           id: "or",
           label: "Operating rooms",
-          where: codesFor(hospital, (room) => room.kind === "or").join(" · ") || "—",
+          floors: codesFor(hospital, (room) => room.kind === "or"),
           ...tally(orRooms),
           surge: null,
         },
@@ -387,7 +388,12 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
 
       <section className="cap-units" aria-label="Receiving units">
         {model.units.map((unit) => (
-          <Unit key={unit.id} unit={unit} />
+          <Unit 
+            key={unit.id} 
+            unit={unit} 
+            hospital={hospital}
+            onOpenFloor={onOpenFloor}
+          />
         ))}
       </section>
 
@@ -482,19 +488,85 @@ function Metric({ label, value, suffix = "", alert = false }) {
   );
 }
 
-function Unit({ unit }) {
+function Unit({ unit, hospital, onOpenFloor }) {
   const open = useCount(unit.available);
   const share = pct(unit.occupied, unit.total);
+
+  // Determine unit status badge
+  let statusTone = "is-nominal";
+  let statusLabel = "STABLE";
+  if (share >= 90 || unit.available === 0) {
+    statusTone = "is-critical";
+    statusLabel = "CRITICAL";
+  } else if (share >= 75) {
+    statusTone = "is-warning";
+    statusLabel = "CONSTRAINED";
+  }
+
+  const handleFloorClick = (code) => {
+    if (!onOpenFloor || !hospital) return;
+    const match = hospital.find((f) => f.code === code);
+    if (match) onOpenFloor(match.id);
+  };
+
   return (
-    <article className="cap-unit">
-      <p className="kicker">{unit.label}</p>
-      <strong>{open}</strong>
-      <span>open</span>
-      <Meter share={share} />
-      <p>{unit.occupied} of {unit.total} in use · {unit.where}</p>
-      {unit.surge != null && (
-        <p>{unit.surge} surge {unit.surge === 1 ? "bed" : "beds"} still open</p>
-      )}
+    <article className={`cap-unit-card ${statusTone}`}>
+      {/* Top row: Label + Location Pills */}
+      <div className="cap-unit-top">
+        <span className="cap-unit-label">{unit.label}</span>
+        <div className="cap-unit-pills">
+          {unit.floors.map((code) => (
+            <button
+              key={code}
+              type="button"
+              className="floor-nav-pill"
+              title={`View ${code} on live map`}
+              onClick={() => handleFloorClick(code)}
+            >
+              {code}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Stat row: Large Open Count + Status Badge */}
+      <div className="cap-unit-stat-row">
+        <div className="cap-unit-open-wrap">
+          <strong>{open}</strong>
+          <span>OPEN</span>
+        </div>
+        <span className={`cap-unit-status-badge ${statusTone}`}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* Meter track with census ratio & percentage header */}
+      <div className="cap-unit-meter-section">
+        <div className="cap-unit-ratio-row">
+          <span>{unit.occupied} of {unit.total} in use</span>
+          <strong>{share}%</strong>
+        </div>
+        <Meter share={share} />
+      </div>
+
+      {/* Standardized Bottom Buffer / Surge row */}
+      <div className="cap-unit-footer">
+        {unit.surge != null ? (
+          unit.surge > 0 ? (
+            <span className="surge-status-ready">
+              +{unit.surge} surge {unit.surge === 1 ? "bed" : "beds"} ready
+            </span>
+          ) : (
+            <span className="surge-status-exhausted">
+              ⚠ Surge capacity exhausted
+            </span>
+          )
+        ) : (
+          <span className="surge-status-nominal">
+            Post-Op Recovery: Clear
+          </span>
+        )}
+      </div>
     </article>
   );
 }
