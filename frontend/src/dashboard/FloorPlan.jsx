@@ -184,26 +184,10 @@ export default function FloorPlan({
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return undefined;
-    const onWheel = (event) => {
-      event.preventDefault();
-      const next = Math.min(3.6, Math.max(0.8, zoom * (event.deltaY > 0 ? 0.9 : 1.1)));
-      const rect = svg.getBoundingClientRect();
-      const px = (event.clientX - rect.left) / rect.width;
-      const py = (event.clientY - rect.top) / rect.height;
-      const oldW = FRAME.w / zoom;
-      const oldH = FRAME.h / zoom;
-      const newW = FRAME.w / next;
-      const newH = FRAME.h / next;
-      const worldX = pan.x + px * oldW;
-      const worldY = pan.y + py * oldH;
-      onPanZoom(
-        { x: worldX - px * newW, y: worldY - py * newH },
-        next,
-      );
-    };
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
-  }, [zoom, pan, onPanZoom]);
+    const stopWheel = (event) => event.preventDefault();
+    svg.addEventListener("wheel", stopWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", stopWheel);
+  }, []);
 
   function unitsPerPixel() {
     const rect = svgRef.current.getBoundingClientRect();
