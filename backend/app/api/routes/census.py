@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import FlowEvent, HospitalState, Room, Transfer
+from app.models import FlowEvent, HospitalState, Room, Staff, Transfer
 from app.sim import declare_surge
 
 router = APIRouter()
@@ -77,6 +77,26 @@ def flow(db: Session = Depends(get_db)):
                 "kind": row.kind,
                 "room_id": row.room_id,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/staff")
+def staff(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Staff).order_by(Staff.unit, Staff.role, Staff.name)).all()
+    return {
+        "staff": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "role": row.role,
+                "unit": row.unit,
+                "specialty": row.specialty,
+                "shift": row.shift,
+                "on_duty": row.on_duty,
+                "extension": row.extension,
             }
             for row in rows
         ]

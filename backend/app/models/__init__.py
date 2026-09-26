@@ -70,6 +70,19 @@ class Death(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Staff(Base):
+    __tablename__ = "staff"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(16))
+    unit: Mapped[str] = mapped_column(String(16))
+    specialty: Mapped[str] = mapped_column(String(80))
+    shift: Mapped[str] = mapped_column(String(16))
+    on_duty: Mapped[bool] = mapped_column(Boolean, default=True)
+    extension: Mapped[str] = mapped_column(String(8))
+
+
 class HospitalState(Base):
     __tablename__ = "hospital_state"
 
