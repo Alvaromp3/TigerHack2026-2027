@@ -24,7 +24,6 @@ const NAV = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "capacity", label: "Capacity", icon: "bed" },
   { id: "flow", label: "Patient Flow", icon: "flow" },
-  { id: "equipment", label: "Equipment", icon: "plug" },
   { id: "turnover", label: "Bed turnover", icon: "broom" },
   { id: "staff", label: "Staff", icon: "users" },
   { id: "incidents", label: "Incidents", icon: "alert" },
@@ -65,7 +64,6 @@ const NOTES = {
   overview: "Census for this floor is the card on the left. The plate stays on screen.",
   capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
   flow: "Every admit, floor move, OR case, discharge, and diversion.",
-  equipment: "Monitors, vents, and pumps sit on the selected bed. Pick a room to read them.",
   turnover: "Purple beds are in cleaning. They are not free until housekeeping marks them ready.",
   staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
   reports: "Reports stay off this demo. The live plate is the operational view.",
@@ -116,14 +114,6 @@ function Icon({ name }) {
     return (
       <svg {...common}>
         <path d="M4 7h16M4 12h16M4 17h16" />
-      </svg>
-    );
-  }
-  if (name === "plug") {
-    return (
-      <svg {...common}>
-        <path d="M12 7v5" />
-        <path d="M7.5 9.2a6.2 6.2 0 1 0 9 0" />
       </svg>
     );
   }
@@ -185,76 +175,6 @@ function Icon({ name }) {
     );
   }
   return null;
-}
-
-function equipmentFor(room) {
-  if (!room?.census) {
-    if (room?.kind === "or") {
-      return [
-        { name: "Anesthesia machine", state: "Standby", note: "Ready for next case" },
-        { name: "Surgical lights", state: "Operational", note: "Both booms online" },
-        { name: "Electrosurgery unit", state: "Standby", note: "Self-test passed" },
-        { name: "OR table", state: "Operational", note: "Locked and leveled" },
-      ];
-    }
-    return [
-      { name: "Wall O₂ / air", state: "Operational", note: "Line pressure normal" },
-      { name: "Suction", state: "Operational", note: "Canister ready" },
-    ];
-  }
-
-  const busy = ["critical", "warning", "normal"].includes(room.status);
-  const critical = room.status === "critical";
-  const cleaning = room.status === "cleaning";
-  const rows = [
-    {
-      name: "Patient monitor",
-      state: cleaning ? "Cleaning" : "Operational",
-      note: critical ? "Continuous vitals · alarms armed" : busy ? "Telemetry active" : "Standby on bed",
-    },
-    {
-      name: "Infusion pump",
-      state: cleaning ? "Cleaning" : busy ? "Operational" : "Standby",
-      note: busy ? (critical ? "Pressors / fluids running" : "Maintenance fluids") : "Cassette clear",
-    },
-    {
-      name: "Bedside oxygen",
-      state: "Operational",
-      note: critical ? "High-flow capable" : "Nasal cannula ready",
-    },
-    {
-      name: "Crash cart",
-      state: critical ? "At bedside" : "On unit",
-      note: critical ? "Defib pads applied" : "Sealed · last check today",
-    },
-  ];
-
-  if (room.dept === "icu" || room.dept === "trauma" || room.dept === "ed" || critical) {
-    rows.splice(1, 0, {
-      name: "Ventilator",
-      state: critical ? "Operational" : busy ? "Standby" : "Standby",
-      note: critical ? "Invasive / NIV ready" : "Circuit checked",
-    });
-  }
-
-  if (room.dept === "ed" || room.dept === "trauma") {
-    rows.push({
-      name: "Portable ultrasound",
-      state: "Operational",
-      note: critical ? "FAST exam available" : "Charged on dock",
-    });
-  }
-
-  if (room.kind === "or") {
-    return [
-      { name: "Anesthesia machine", state: room.status === "available" ? "Standby" : "Operational", note: "Gas scavenger ok" },
-      { name: "Surgical table", state: "Operational", note: "Position locked" },
-      { name: "Overhead lights", state: "Operational", note: "Both banks on" },
-      { name: "C-arm / imaging", state: room.status === "available" ? "Standby" : "Operational", note: "Lead drapes ready" },
-    ];
-  }
-
-  return rows;
 }
 
 function esiFor(status) {
@@ -1015,7 +935,6 @@ export default function CommandCenter() {
 }
 
 function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], onClose }) {
-  const gear = equipmentFor(room);
   const critical = deptBeds.filter((item) => item.status === "critical").length;
   const available = deptBeds.filter((item) => item.status === "available").length;
   const warning = deptBeds.filter((item) => item.status === "warning").length;
@@ -1057,7 +976,7 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], o
       </div>
 
       <div className="tabs">
-        {["overview", "patients", "equipment", "history"].map((item) => (
+        {["overview", "patients", "history"].map((item) => (
           <button
             key={item}
             type="button"
@@ -1200,29 +1119,6 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], o
                   : "This space is not an inpatient bed — use it for support workflow only."}
               </p>
             </div>
-          )}
-        </div>
-      )}
-
-      {tab === "equipment" && (
-        <div className="sheet">
-          <p className="kicker">Bedside devices</p>
-          <ul className="equip equip-rich">
-            {gear.length === 0 && <li>No bedside devices in this room.</li>}
-            {gear.map((item) => (
-              <li key={item.name}>
-                <div>
-                  <span>{item.name}</span>
-                  {item.note && <small>{item.note}</small>}
-                </div>
-                <strong className={item.state === "Operational" || item.state === "At bedside" ? "ok" : "warn"}>
-                  {item.state}
-                </strong>
-              </li>
-            ))}
-          </ul>
-          {occupied && room.status === "critical" && (
-            <p className="detail-note">Critical pathway: crash cart and airway kit staged at the door.</p>
           )}
         </div>
       )}
