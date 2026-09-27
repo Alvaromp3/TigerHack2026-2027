@@ -33,6 +33,7 @@ def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | 
         "spo2": patient.spo2 if patient else None,
         "respiratory_rate": patient.respiratory_rate if patient else None,
         "temperature": patient.temperature if patient else None,
+        "stay_ticks": patient.stay_ticks if patient else None,
         "clean_type": room.clean_type,
         "clean_priority": room.clean_priority,
         "ticks_left": room.ticks_left,

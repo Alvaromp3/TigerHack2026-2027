@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CORE, FRAME, spaceBucket } from "./floors";
+import { CORE, FRAME, STATUS, spaceBucket } from "./floors";
 
 const SHELL = "M 5 3.2 H 75.6 V 40 L 60 56.6 H 5 Z";
 
@@ -109,6 +109,22 @@ function shortUse(room) {
   return type;
 }
 
+function shortName(name) {
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length < 2) return parts[0] || "";
+  return `${parts[0][0]}. ${parts[parts.length - 1]}`;
+}
+
+// What a charge nurse needs to read off the plate for one bed, in two words.
+function bedLine(room) {
+  if (room.patient) return { text: shortName(room.patient), fill: "#1f3f68" };
+  if (room.status === "cleaning") return { text: "Cleaning", fill: "#5b4a8f" };
+  if (room.status === "reserved") return { text: room.holdFor ? `Held · ${shortName(room.holdFor)}` : "Held", fill: "#8a6200" };
+  if (room.status === "blocked") return { text: "Out of service", fill: "#374151" };
+  if (room.status === "available") return { text: "Open", fill: "#1d7a4a" };
+  return null;
+}
+
 function fitLabel(text, box, preferred) {
   const glyphs = Math.max(String(text).length, 1);
   const fitted = (box * 0.86) / (glyphs * 0.56);
@@ -136,9 +152,10 @@ function RoomTag({ room, selected }) {
   }
   const wide = room.w >= 6.5 || room.h >= 6;
   const title = room.census ? room.id : (room.label || room.type || "");
-  const sub = room.h >= 5.4 && room.w >= 4.2 && (room.census || wide) ? shortUse(room) : "";
+  const info = room.census && room.h >= 3.2 ? bedLine(room) : null;
+  const sub = info ? info.text : (room.h >= 5.4 && room.w >= 4.2 && wide ? shortUse(room) : "");
   const titleSize = fitLabel(title, room.w, wide ? 1.15 : 0.98);
-  const subSize = sub ? fitLabel(sub, room.w, Math.min(0.48, titleSize * 0.62)) : 0;
+  const subSize = sub ? fitLabel(sub, room.w, Math.min(info ? 0.56 : 0.48, titleSize * 0.66)) : 0;
   const cx = room.x + room.w / 2;
   const cy = room.y + room.h / 2;
   return (
@@ -162,9 +179,9 @@ function RoomTag({ room, selected }) {
           textAnchor="middle"
           dominantBaseline="middle"
           fontSize={subSize}
-          fontWeight="520"
+          fontWeight={info ? 600 : 520}
           letterSpacing="0.01"
-          fill={muted}
+          fill={info ? info.fill : muted}
         >
           {sub}
         </text>
@@ -210,13 +227,31 @@ export default function FloorPlan({
 }) {
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const live = useRef({ zoom, pan, onPanZoom });
+  live.current = { zoom, pan, onPanZoom };
 
+  // Wheel / trackpad pinch zooms toward the cursor so the point under it stays put.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return undefined;
-    const stopWheel = (event) => event.preventDefault();
-    svg.addEventListener("wheel", stopWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", stopWheel);
+    function onWheel(event) {
+      event.preventDefault();
+      const { zoom: z, pan: p, onPanZoom: move } = live.current;
+      const next = Math.min(3.6, Math.max(0.22, z * Math.exp(-event.deltaY * 0.0015)));
+      if (next === z) return;
+      const rect = svg.getBoundingClientRect();
+      const fx = (event.clientX - rect.left) / rect.width;
+      const fy = (event.clientY - rect.top) / rect.height;
+      move(
+        {
+          x: p.x + fx * (FRAME.w / z - FRAME.w / next),
+          y: p.y + fy * (FRAME.h / z - FRAME.h / next),
+        },
+        next,
+      );
+    }
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
   }, []);
 
   function unitsPerPixel() {
@@ -321,17 +356,39 @@ export default function FloorPlan({
           let fill = BUCKET_FILL[bucket] || "#f4f7fb";
           if (room.kind === "restroom") fill = "#eef2f6";
           const faded = dim || statusMiss || layerMiss;
+          const marker = room.census ? STATUS[room.status] : null;
+          const critical = room.census && room.status === "critical";
+          const dotR = Math.min(0.4, room.w * 0.08, room.h * 0.08);
           return (
-            <g key={room.id} data-room={room.id} className="map-hit" opacity={faded ? (statusMiss ? 0.18 : 0.35) : 1}>
+            <g
+              key={room.id}
+              data-room={room.id}
+              className={`map-hit${selected ? " is-selected" : ""}`}
+              opacity={faded ? (statusMiss ? 0.18 : 0.35) : 1}
+            >
               <rect
+                className="room-shape"
                 x={room.x}
                 y={room.y}
                 width={room.w}
                 height={room.h}
                 fill={fill}
-                stroke={selected ? "#0f172a" : "#9aabbd"}
-                strokeWidth={selected ? 0.22 : 0.07}
+                stroke={selected ? "#2f5f9e" : "#9aabbd"}
+                strokeWidth={selected ? 0.24 : 0.07}
               />
+              {critical && (
+                <rect
+                  className="room-pulse"
+                  x={room.x + 0.14}
+                  y={room.y + 0.14}
+                  width={Math.max(0.1, room.w - 0.28)}
+                  height={Math.max(0.1, room.h - 0.28)}
+                  fill="none"
+                  stroke={STATUS.critical.color}
+                  strokeWidth="0.2"
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {showBeds && room.census && room.bed && (
                 <rect
                   x={room.bed.x}
@@ -359,6 +416,17 @@ export default function FloorPlan({
                 <Lavatory x={room.x + room.w / 2} y={room.y + room.h / 2 - 0.15} />
               )}
               {showLabels && <RoomTag room={room} selected={selected} />}
+              {marker && (
+                <circle
+                  cx={room.x + room.w - dotR - 0.3}
+                  cy={room.y + dotR + 0.3}
+                  r={dotR}
+                  fill={marker.color}
+                  stroke="#fff"
+                  strokeWidth="0.1"
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
             </g>
           );
         })}

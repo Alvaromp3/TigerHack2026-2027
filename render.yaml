@@ -33,3 +33,7 @@ services:
         sync: false
       - key: AUTH0_CLIENT_SECRET
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_MODEL
+        value: gemini-2.5-flash

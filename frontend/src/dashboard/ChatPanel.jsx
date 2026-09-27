@@ -22,14 +22,14 @@ export default function ChatPanel({ open, onClose, surgeOn = false }) {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(apiUrl("/api/chat"), {
+      const res = await fetch(import.meta.env.DEV ? "/api/chat" : apiUrl("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next.slice(-12) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.detail || "The assistant could not answer.");
+        setError(typeof body.detail === "string" ? body.detail : "The assistant could not answer.");
         return;
       }
       setMessages([...next, { role: "assistant", content: body.reply }]);

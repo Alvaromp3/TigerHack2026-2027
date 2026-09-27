@@ -32,7 +32,7 @@ class ChatIn(BaseModel):
 
 @router.post("/chat")
 def chat(body: ChatIn, db: Session = Depends(get_db)):
-    if not settings.openrouter_api_key:
+    if not settings.google_api_key:
         raise HTTPException(status_code=503, detail="The assistant is not configured.")
     turns = []
     for turn in body.messages[-12:]:
@@ -58,37 +58,38 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         "units": snapshot["units"],
         "pending": snapshot["pending"][:20],
     }
-    payload = {
-        "model": settings.openrouter_model,
-        "messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "system", "content": "Operations snapshot:\n" + json.dumps(brief, default=str)},
-            *turns,
-        ],
-    }
+    contents = [
+        {
+            "role": "user" if turn["role"] == "user" else "model",
+            "parts": [{"text": turn["content"]}],
+        }
+        for turn in turns
+    ]
     try:
         response = httpx.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{settings.google_model}:generateContent",
             headers={
-                "Authorization": f"Bearer {settings.openrouter_api_key}",
+                "x-goog-api-key": settings.google_api_key,
                 "Content-Type": "application/json",
             },
-            json=payload,
+            json={
+                "system_instruction": {
+                    "parts": [{
+                        "text": SYSTEM + "\n\nOperations snapshot:\n" + json.dumps(brief, default=str),
+                    }],
+                },
+                "contents": contents,
+            },
             timeout=40,
         )
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="The assistant could not be reached.") from None
-    if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail="The assistant could not answer.")
     data = response.json()
-    choices = data.get("choices") or []
-    message = (choices[0].get("message") or {}) if choices else {}
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, list):
-        content = "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part)
-            for part in content
-        )
-    if not isinstance(content, str) or not content.strip():
+    if response.status_code >= 400:
+        message = (data.get("error") or {}).get("message") or "The assistant could not answer."
+        raise HTTPException(status_code=502, detail=message)
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    content = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+    if not content.strip():
         raise HTTPException(status_code=502, detail="The assistant returned an empty answer.")
     return {"reply": content.strip()}

@@ -1174,9 +1174,23 @@ export default function CommandCenter() {
                     <span className={flowLive ? "live-sync" : "live-sync is-wait"}>
                       <i />
                       {flowLive && flowSyncedAt
-                        ? `Simulation · Synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
-                        : "Simulation · Waiting"}
+                        ? `Live · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
+                        : "Connecting to hospital"}
                     </span>
+                    <div className="floor-seg" role="group" aria-label="Floor">
+                      {hospital.map((level) => (
+                        <button
+                          key={level.id}
+                          type="button"
+                          className={level.id === floor.id ? "is-on" : ""}
+                          aria-pressed={level.id === floor.id}
+                          title={level.subtitle || level.name}
+                          onClick={() => goToFloor(level.id)}
+                        >
+                          {level.code}
+                        </button>
+                      ))}
+                    </div>
                     <button
                       type="button"
                       className={elevatorOpen ? "live-btn is-on" : "live-btn"}
@@ -1187,13 +1201,14 @@ export default function CommandCenter() {
                     </button>
                     <button
                       type="button"
-                      className="live-btn is-on"
+                      className={summaryOpen ? "live-btn is-on" : "live-btn"}
+                      aria-pressed={summaryOpen}
                       onClick={() => {
-                        setSummaryOpen(true);
+                        setSummaryOpen((open) => !open);
                         fitMap();
                       }}
                     >
-                      Floor summary
+                      Summary
                     </button>
                   </div>
                 </div>
@@ -1282,6 +1297,11 @@ export default function CommandCenter() {
             />
 
             <div className="zoom-tools" role="group" aria-label="Zoom">
+              <button type="button" onClick={fitMap} aria-label="Fit floor to screen" title="Fit floor">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <path d="M1.5 5V1.5H5M9 1.5h3.5V5M12.5 9v3.5H9M5 12.5H1.5V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
               <button type="button" onClick={() => changeZoom(1)} aria-label="Zoom in">
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
                   <path d="M7 1.5v11M1.5 7h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -1360,6 +1380,8 @@ export default function CommandCenter() {
                     staff={(ops?.staff && ops.staff.length ? ops.staff : roster)}
                     surgeOn={surgeOn}
                     movements={movements}
+                    incidents={openIncidents.filter((item) => item.room_id === selected.id)}
+                    onOpenRoom={(roomId) => openOpsItem({ nav: "live", room_id: roomId })}
                     onClose={() => setSelectedId(null)}
                   />
                 )}
@@ -1368,14 +1390,35 @@ export default function CommandCenter() {
 
             {hover && (
               <div className="tip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
-                <strong>{hover.room.id}</strong>
-                <span>
-                  {hover.room.census ? "1 bed · " : ""}
-                  {hover.room.status ? STATUS[hover.room.status].label : hover.room.type}
-                </span>
+                <div className="tip-head">
+                  <strong>{hover.room.id}</strong>
+                  {hover.room.status && STATUS[hover.room.status] && (
+                    <span className="tip-status" style={{ color: STATUS[hover.room.status].color }}>
+                      <i style={{ background: STATUS[hover.room.status].color }} />
+                      {STATUS[hover.room.status].label}
+                    </span>
+                  )}
+                </div>
                 <small>
-                  {hover.room.deptLabel} · {floor.name}
+                  {hover.room.census ? hover.room.type : hover.room.type || hover.room.deptLabel} · {hover.room.deptLabel}
                 </small>
+                {hover.room.patient && (
+                  <div className="tip-patient">
+                    <b>{hover.room.patient}{hover.room.age != null ? `, ${hover.room.age}` : ""}</b>
+                    <span>{hover.room.diagnosis || hover.room.chiefComplaint || "Workup in progress"}</span>
+                    {hover.room.heartRate != null && (
+                      <span className="tip-vitals">
+                        HR {hover.room.heartRate}
+                        {hover.room.spo2 != null ? ` · SpO₂ ${hover.room.spo2}%` : ""}
+                        {hover.room.systolic != null ? ` · BP ${hover.room.systolic}/${hover.room.diastolic}` : ""}
+                      </span>
+                    )}
+                    {hover.room.nurse && <span>Nurse · {hover.room.nurse}</span>}
+                  </div>
+                )}
+                {hover.room.status === "reserved" && hover.room.holdFor && (
+                  <small>Held for {hover.room.holdFor}</small>
+                )}
                 {hover.room.status === "cleaning" && (
                   <small>
                     {cleanLabel(hover.room.cleanType)}
@@ -1401,19 +1444,154 @@ const ROOM_TABS = [
   { id: "history", label: "Timeline" },
 ];
 
+// Matches NURSE_LOAD in backend/app/ops_snapshot.py.
+const NURSE_LOAD = 4;
+const BED_CHIPS = 6;
+
 function lookupStaff(staff, name, roomId) {
   if (!name) return null;
   const person = (staff || []).find((item) => item.name === name);
-  if (!person) return { name, detail: "Not on the roster", beds: [] };
+  if (!person) return { name, known: false, detail: "", beds: [], load: null };
   const duty = person.on_duty ? "On duty" : "Off duty";
+  const patients = person.patients || [];
   return {
     name,
+    known: true,
     detail: `${person.specialty || person.role} · ${person.shift} shift · ${duty}`,
-    beds: (person.patients || []).filter((id) => id !== roomId),
+    onDuty: person.on_duty,
+    extension: person.extension,
+    beds: patients.filter((id) => id !== roomId),
+    load: person.patients ? patients.length : null,
   };
 }
 
-function RoomCard({ room, floor, tab, onTab, deptBeds, staff = [], surgeOn = false, movements = [], onClose }) {
+function initials(name) {
+  const parts = String(name).replace(/^(Dr\.?|RN)\s+/i, "").trim().split(/\s+/);
+  return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
+function stayLabel(ticks) {
+  if (ticks == null) return null;
+  const minutes = Math.round((ticks * 9) / 60);
+  if (minutes < 1) return "Just arrived";
+  if (minutes < 60) return `${minutes} min in bed`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min in bed`;
+}
+
+// Simplified NEWS2 from the last recorded vitals (no consciousness or O2 terms).
+function earlyWarning(room) {
+  if (room.heartRate == null) return null;
+  const rows = [];
+  const rr = room.respiratoryRate;
+  const spo2 = room.spo2;
+  const sbp = room.systolic;
+  const hr = room.heartRate;
+  const temp = room.temperature == null ? null : room.temperature / 10;
+  if (rr != null) rows.push({ label: "RR", value: rr, score: rr <= 8 ? 3 : rr <= 11 ? 1 : rr <= 20 ? 0 : rr <= 24 ? 2 : 3 });
+  if (spo2 != null) rows.push({ label: "SpO₂", value: `${spo2}%`, score: spo2 <= 91 ? 3 : spo2 <= 93 ? 2 : spo2 <= 95 ? 1 : 0 });
+  if (sbp != null) {
+    rows.push({
+      label: "BP",
+      value: `${sbp}/${room.diastolic ?? "—"}`,
+      score: sbp <= 90 ? 3 : sbp <= 100 ? 2 : sbp <= 110 ? 1 : sbp <= 219 ? 0 : 3,
+    });
+  }
+  rows.push({ label: "HR", value: hr, score: hr <= 40 ? 3 : hr <= 50 ? 1 : hr <= 90 ? 0 : hr <= 110 ? 1 : hr <= 130 ? 2 : 3 });
+  if (temp != null) {
+    rows.push({
+      label: "Temp",
+      value: `${temp.toFixed(1)}°`,
+      score: temp <= 35 ? 3 : temp <= 36 ? 1 : temp <= 38 ? 0 : temp <= 39 ? 1 : 2,
+    });
+  }
+  const total = rows.reduce((sum, row) => sum + row.score, 0);
+  const level = total >= 7 ? "high" : total >= 5 || rows.some((row) => row.score === 3) ? "medium" : "low";
+  const advice = {
+    high: "Emergency response. Continuous monitoring.",
+    medium: "Urgent review by the attending.",
+    low: "Routine observation.",
+  }[level];
+  return { total, level, advice, rows };
+}
+
+function unitMix(beds) {
+  const mix = { critical: 0, occupied: 0, turnover: 0, open: 0 };
+  for (const bed of beds) {
+    if (bed.status === "critical") mix.critical += 1;
+    else if (bed.status === "warning" || bed.status === "normal") mix.occupied += 1;
+    else if (bed.status === "available") mix.open += 1;
+    else mix.turnover += 1;
+  }
+  return mix;
+}
+
+const MIX = [
+  { id: "critical", label: "Critical" },
+  { id: "occupied", label: "Occupied" },
+  { id: "turnover", label: "Turnover" },
+  { id: "open", label: "Open" },
+];
+
+function TeamMember({ role, person, limit, onOpenRoom }) {
+  const [expanded, setExpanded] = useState(false);
+  const over = limit != null && person.load != null && person.load > limit;
+  const beds = expanded ? person.beds : person.beds.slice(0, BED_CHIPS);
+  return (
+    <div className="rc-member">
+      <span className={person.onDuty === false ? "rc-avatar is-off" : "rc-avatar"} aria-hidden="true">
+        {initials(person.name)}
+      </span>
+      <div className="rc-member-main">
+        <div className="rc-member-top">
+          <strong>{person.name}</strong>
+          {person.extension && (
+            <a className="rc-ext" href={`tel:${person.extension}`}>ext {person.extension}</a>
+          )}
+        </div>
+        <span className="rc-role">{role}{person.detail ? ` · ${person.detail}` : ""}</span>
+        {person.load != null && (
+          <div className={over ? "rc-load is-over" : "rc-load"}>
+            <span>
+              {person.load} {person.load === 1 ? "patient" : "patients"}
+              {limit != null ? ` · safe load ${limit}` : ""}
+            </span>
+            {limit != null && (
+              <i style={{ "--fill": `${Math.min(100, (person.load / limit) * 100)}%` }} />
+            )}
+          </div>
+        )}
+        {person.beds.length > 0 && (
+          <div className="rc-beds">
+            {beds.map((id) => (
+              <button key={id} type="button" onClick={() => onOpenRoom?.(id)} title={`Open ${id}`}>
+                {id}
+              </button>
+            ))}
+            {person.beds.length > BED_CHIPS && (
+              <button type="button" className="rc-more" onClick={() => setExpanded((open) => !open)}>
+                {expanded ? "Show less" : `+${person.beds.length - BED_CHIPS} more`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RoomCard({
+  room,
+  floor,
+  tab,
+  onTab,
+  deptBeds,
+  staff = [],
+  surgeOn = false,
+  movements = [],
+  incidents = [],
+  onOpenRoom,
+  onClose,
+}) {
   const vitals = vitalsFor(room);
   const history = historyFor(room, movements);
   const occupied = Boolean(room.patient);
@@ -1422,7 +1600,12 @@ function RoomCard({ room, floor, tab, onTab, deptBeds, staff = [], surgeOn = fal
   const nurse = lookupStaff(staff, room.nurse, room.id);
   const censusBeds = deptBeds.filter((item) => item.census);
   const openBeds = censusBeds.filter((item) => item.status === "available").length;
-  const criticalBeds = censusBeds.filter((item) => item.status === "critical").length;
+  const mix = unitMix(censusBeds);
+  const warning = occupied ? earlyWarning(room) : null;
+  const stay = occupied ? stayLabel(room.stayTicks) : null;
+  const charge = lookupStaff(staff, room.charge, room.id);
+  const cleanDone = room.status === "cleaning" && room.ticksLeft === 0;
+  const linenDone = !room.linenStage || room.linenStage === "ready";
 
   return (
     <div>
@@ -1467,40 +1650,124 @@ function RoomCard({ room, floor, tab, onTab, deptBeds, staff = [], surgeOn = fal
       </div>
 
       {tab === "overview" && (
-        <div className="sheet">
-          <div className={`situation-band ${situation.tone}`}>
-            <strong>{situation.band}{situation.detail ? ` · ${situation.detail}` : ""}</strong>
-            <span>{situation.why}</span>
-          </div>
-          {situation.owner && <Meta label="Owner">{situation.owner}</Meta>}
-          {situation.ready && <Meta label="Ready in">{situation.ready}</Meta>}
-          {room.surge && room.census && (
-            <Meta label="Incoming">Held for incoming casualties</Meta>
-          )}
-          {room.census && censusBeds.length > 0 && (
-            <Meta label="Unit">
-              {`${room.deptLabel}: ${openBeds} of ${censusBeds.length} beds open · ${criticalBeds} critical`}
-            </Meta>
-          )}
-          {(attending || nurse || room.charge) && (
-            <div className="team">
-              <p className="kicker">Who is here</p>
-              {attending && (
-                <>
-                  <p>Attending · {attending.name}</p>
-                  <p>{attending.detail}</p>
-                  {attending.beds.length > 0 && <p>Also covering {attending.beds.join(", ")}</p>}
-                </>
-              )}
-              {nurse && (
-                <>
-                  <p>Primary nurse · {nurse.name}</p>
-                  <p>{nurse.detail}</p>
-                  {nurse.beds.length > 0 && <p>Also covering {nurse.beds.join(", ")}</p>}
-                </>
-              )}
-              {room.charge && <p>Charge nurse · {room.charge}</p>}
+        <div className="sheet rc">
+          <div className={`rc-hero ${situation.tone}`}>
+            <div className="rc-hero-top">
+              <span className="rc-band">{situation.band}</span>
+              {situation.detail && <span className="rc-sev">{situation.detail}</span>}
+              {stay && <span className="rc-stay">{stay}</span>}
             </div>
+            {occupied ? (
+              <>
+                <strong className="rc-name">
+                  {room.patient}
+                  {room.age != null && <small>{room.age} yrs</small>}
+                </strong>
+                <span className="rc-dx">{room.diagnosis || "Working diagnosis pending"}</span>
+                {room.chiefComplaint && <span className="rc-cc">Came in with {room.chiefComplaint}</span>}
+              </>
+            ) : (
+              <span className="rc-dx">{situation.why}</span>
+            )}
+            {(occupied || (room.surge && room.census)) && (
+              <div className="rc-tags">
+                {occupied && <span className="rc-tag">{esiFor(room.status)}</span>}
+                {occupied && (
+                  <span className={room.needsOr ? "rc-tag is-alert" : "rc-tag is-next"}>
+                    Next · {dispositionFor(room, surgeOn)}
+                  </span>
+                )}
+                {room.surge && room.census && (
+                  <span className={surgeOn && !occupied ? "rc-tag is-alert" : "rc-tag"}>
+                    {surgeOn && !occupied ? "Held for incoming casualties" : "Surge-ready bed"}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {incidents.map((item) => (
+            <div key={item.id} className="rc-incident">
+              <strong>{item.title}</strong>
+              <span>{item.severity ? `${item.severity} severity` : "Open incident"} · bed blocked until resolved</span>
+            </div>
+          ))}
+
+          {warning && (
+            <section className="rc-section">
+              <header className="rc-sec-head">
+                <p className="kicker">Early warning</p>
+                <span className={`rc-news is-${warning.level}`}>NEWS {warning.total}</span>
+              </header>
+              <div className="rc-vitals">
+                {warning.rows.map((row) => (
+                  <div key={row.label} className={`rc-vital s${row.score}`}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </div>
+              <p className="rc-hint">{warning.advice}</p>
+            </section>
+          )}
+
+          {room.status === "cleaning" && (
+            <section className="rc-section">
+              <header className="rc-sec-head">
+                <p className="kicker">Turnover</p>
+                <span className="rc-unit-flag">
+                  {situation.ready === "Now" ? "Ready now" : `Ready · ${situation.ready}`}
+                </span>
+              </header>
+              <ol className="rc-steps">
+                <li className={cleanDone ? "is-done" : "is-now"}>
+                  <b>Clean · {cleanLabel(room.cleanType)}</b>
+                  <span>{room.housekeeper || (cleanDone ? "Done" : "Waiting for a housekeeper")}</span>
+                </li>
+                <li className={linenDone ? "is-done" : cleanDone ? "is-now" : ""}>
+                  <b>Linen</b>
+                  <span>{linenLabel(room.linenStage)}{room.linenAide ? ` · ${room.linenAide}` : ""}</span>
+                </li>
+                <li className={cleanDone && linenDone ? "is-now" : ""}>
+                  <b>Open bed</b>
+                  <span>{room.holdFor ? `${room.holdFor} is waiting` : "Next admit"}</span>
+                </li>
+              </ol>
+            </section>
+          )}
+
+          {room.census && censusBeds.length > 0 && (
+            <section className="rc-section">
+              <header className="rc-sec-head">
+                <p className="kicker">{room.deptLabel}</p>
+                <span className={openBeds === 0 ? "rc-unit-flag is-full" : "rc-unit-flag"}>
+                  {openBeds === 0 ? "No open beds" : `${openBeds} of ${censusBeds.length} open`}
+                </span>
+              </header>
+              <div className="rc-bar" role="img" aria-label={MIX.map((item) => `${mix[item.id]} ${item.label}`).join(", ")}>
+                {MIX.filter((item) => mix[item.id] > 0).map((item) => (
+                  <i key={item.id} className={`is-${item.id}`} style={{ flexGrow: mix[item.id] }} />
+                ))}
+              </div>
+              <ul className="rc-bar-key">
+                {MIX.map((item) => (
+                  <li key={item.id}>
+                    <i className={`is-${item.id}`} />
+                    {item.label}
+                    <b>{mix[item.id]}</b>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {(attending || nurse || charge) && (
+            <section className="rc-section">
+              <p className="kicker">Care team</p>
+              {attending && <TeamMember role="Attending" person={attending} onOpenRoom={onOpenRoom} />}
+              {nurse && <TeamMember role="Primary nurse" person={nurse} limit={NURSE_LOAD} onOpenRoom={onOpenRoom} />}
+              {charge && <TeamMember role="Charge nurse" person={charge} onOpenRoom={onOpenRoom} />}
+            </section>
           )}
         </div>
       )}

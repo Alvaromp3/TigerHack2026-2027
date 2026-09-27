@@ -562,6 +562,7 @@ export function applyCensus(hospital, rooms) {
         spo2: occupied ? live.spo2 ?? null : null,
         respiratoryRate: occupied ? live.respiratory_rate ?? null : null,
         temperature: occupied ? live.temperature ?? null : null,
+        stayTicks: occupied ? live.stay_ticks ?? null : null,
         cleanType: live.status === "cleaning" ? live.clean_type || null : null,
         cleanPriority: live.status === "cleaning" ? live.clean_priority ?? null : null,
         ticksLeft: live.status === "cleaning" ? live.ticks_left ?? null : null,
