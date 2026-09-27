@@ -88,7 +88,7 @@ async def _ems_loop():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    init_db()
+    await asyncio.to_thread(init_db)
     tasks = [
         asyncio.create_task(_census_loop()),
         asyncio.create_task(_webhook_loop()),
