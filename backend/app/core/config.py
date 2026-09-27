@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
     ]
+    # Any Vercel deployment of the frontend (production and preview URLs) may call the API.
+    cors_origin_regex: str = r"https://[a-z0-9-]+\.vercel\.app"
     auth0_domain: str = ""
     auth0_client_id: str = ""
     auth0_client_secret: str = ""

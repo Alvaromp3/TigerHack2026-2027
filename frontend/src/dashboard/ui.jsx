@@ -1,7 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import { Sparkline } from "./charts";
 import { blockingUnit, tightestUnit } from "./network/ems";
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
+// Mirrors the API: a crew waits for our answer until a minute out, then goes elsewhere.
+export const NO_ANSWER_LEAD_SECONDS = 60;
 
 // Beds the live census has not reported yet have no status and are left out.
 export function bedMix(beds) {
@@ -44,11 +47,11 @@ export function localBriefing({ emsStatus, capacity, incoming = [], totals }) {
   const blocker = blockingUnit(units);
   const soon = dueSoon(incoming);
   const pending = incoming.filter((run) => run.status === "pending");
-  const tightBit = tight ? `${tight.label} is tightest, ${tight.open} open` : "unit capacity is still loading";
+  const tightBit = tight ? `tightest unit: ${tight.label}, ${tight.open} open` : "unit capacity is still loading";
   const lines = [
     diverting
       ? `On diversion${emsStatus?.reason ? ` — ${emsStatus.reason}` : ""}. ${tightBit}.`
-      : `Accepting ambulances. ${tightBit}.`,
+      : `${tightBit.charAt(0).toUpperCase()}${tightBit.slice(1)}.`,
   ];
   if (soon.length) {
     lines.push(
@@ -65,7 +68,7 @@ export function localBriefing({ emsStatus, capacity, incoming = [], totals }) {
   if (first) {
     lines.push(`Answer ${first.unit}: ESI ${first.esi} ${first.complaint_label}${first.bed_id ? `, bed ${first.bed_id}` : ""}.`);
   } else if (!diverting && blocker) {
-    lines.push(`${blocker.label} is ${blocker.level === "full" ? "full" : "limited"}, ${blocker.open} open. Diversion is the lever if the next ambulance needs it.`);
+    lines.push(`${blocker.label}: ${blocker.level === "full" ? "full" : "limited"}, ${blocker.open} open. Diversion is the lever if the next ambulance needs it.`);
   } else if (totals) {
     const net = totals.admit - totals.discharge - totals.transfer;
     lines.push(
@@ -118,6 +121,92 @@ export function PageHead({ kicker, title, sub, children }) {
       </div>
       {children && <div className="page-tools">{children}</div>}
     </header>
+  );
+}
+
+const REDUCED_MOTION =
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+// Full-bleed page header over a photo or a muted looping video from /public.
+export function PageHero({ kicker, title, sub, image, video, poster, position = "center", children }) {
+  const still = !video || REDUCED_MOTION;
+  return (
+    <section className="hero">
+      <div className="hero-media" aria-hidden="true" style={{ "--hero-pos": position }}>
+        {still ? (
+          <img src={poster || image} alt="" />
+        ) : (
+          <video autoPlay muted loop playsInline preload="auto" poster={poster || image}>
+            <source src={video} type="video/mp4" />
+          </video>
+        )}
+      </div>
+      <div className="hero-inner">
+        <div className="hero-copy">
+          <p className="page-kicker">{kicker}</p>
+          <h1>{title}</h1>
+          {sub && <p className="page-sub">{sub}</p>}
+        </div>
+        {children && <div className="hero-side">{children}</div>}
+      </div>
+    </section>
+  );
+}
+
+// Counts up from the last shown value whenever a number changes.
+export function AnimatedNumber({ value, format = String, duration = 800 }) {
+  const valid = Number.isFinite(value);
+  const [shown, setShown] = useState(REDUCED_MOTION && valid ? value : 0);
+  const last = useRef(REDUCED_MOTION && valid ? value : 0);
+  useEffect(() => {
+    if (!valid) return undefined;
+    const from = last.current;
+    if (REDUCED_MOTION || from === value) {
+      last.current = value;
+      setShown(value);
+      return undefined;
+    }
+    const start = performance.now();
+    let frame = 0;
+    const step = (time) => {
+      const t = Math.min(1, (time - start) / duration);
+      const current = Math.round(from + (value - from) * (1 - (1 - t) ** 3));
+      last.current = current;
+      setShown(current);
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [value, valid, duration]);
+  return valid ? format(shown) : "—";
+}
+
+// Route line under an ambulance row: the van moves forward as the ETA runs down.
+export function EtaTrack({ run, left }) {
+  const total = (Date.parse(run.eta_at) - Date.parse(run.created_at)) / 1000;
+  const remaining = run.status === "arrived" ? 0 : left ?? run.eta_seconds ?? 0;
+  const raw = total > 0 ? (1 - remaining / total) * 100 : 100;
+  const pct = Math.max(3, Math.min(100, Number.isFinite(raw) ? raw : 0));
+  return (
+    <span className={run.status === "arrived" ? "eta-track is-here" : "eta-track"} aria-hidden="true">
+      <i style={{ width: `${pct}%` }} />
+      <b style={{ left: `${pct}%` }}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1.8 14.2V6.4h9.4v7.8M11.2 8.6h3.3l3.3 3.2v2.4h-1.4M5.4 14.2h5.2" />
+          <circle cx="4.2" cy="14.6" r="1.5" />
+          <circle cx="14.4" cy="14.6" r="1.5" />
+        </svg>
+      </b>
+    </span>
+  );
+}
+
+export function HeroStat({ value, label, tone }) {
+  return (
+    <div className={tone ? `hero-stat is-${tone}` : "hero-stat"}>
+      <b>{typeof value === "number" ? <AnimatedNumber value={value} /> : value}</b>
+      <span>{label}</span>
+    </div>
   );
 }
 

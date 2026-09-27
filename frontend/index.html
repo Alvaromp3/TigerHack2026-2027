@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#E6EDF6">
 <link rel="icon" type="image/png" href="/logo-tiger.png">
-<title>SurgeCommand — See every bed</title>
+<title>SurgeCommand — The right door, the first time</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=block" rel="stylesheet">
@@ -456,6 +456,7 @@ html.pre .dot{scale:0}
 .s-mock-bar span{margin-left:10px;font-size:12px;font-weight:600;color:#5A6580}
 .s-mock-bar em{margin-left:auto;font-style:normal;font-size:11px;font-weight:600;color:#CF3B3B;
   background:#FCEBEA;padding:4px 10px;border-radius:999px}
+.s-mock-bar em.is-ok{color:#1B7A45;background:#E5F6EC}
 .s-mock-body{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;padding:16px}
 .s-beds{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-content:start}
 .s-beds b{aspect-ratio:1.25;border-radius:6px;border:1px solid var(--s-line);background:#F6F8FB}
@@ -731,7 +732,7 @@ html.pre .dot{scale:0}
 </script>
 </head>
 <body>
-<section class="scrub" id="top" aria-label="The problem and the solution">
+<section class="scrub" id="top" aria-label="From the ambulance to the right hospital">
 <div class="page">
   <div class="card hero-dark">
     <img class="bg" src="/frames/f_001.webp" alt="" aria-hidden="true">
@@ -741,21 +742,21 @@ html.pre .dot{scale:0}
     <div class="scenes" aria-live="polite">
       <div class="scene">
         <span class="scene-k">01 <b>/ 03</b> Problem</span>
-        <h2>Too many patients.<br>No clear plan.</h2>
-        <p>Beds look free, but they are not ready. Teams still use radios and whiteboards.</p>
-        <span class="scene-chip" style="--c:#CF4B3E"><i></i>Emergency · no shared view</span>
+        <h2>Wrong door.<br>They turn around.</h2>
+        <p>The crew commits to a hospital before anyone knows if that unit can take the patient.</p>
+        <span class="scene-chip" style="--c:#CF4B3E"><i></i>Diversion · too late</span>
       </div>
       <div class="scene">
         <span class="scene-k">02 <b>/ 03</b> Why</span>
-        <h2>Staff is ready.<br>The info is not.</h2>
-        <p>Which bed works? Who goes first? Where does the next patient go?</p>
-        <span class="scene-chip" style="--c:#CC8A2C"><i></i>Cause · lost time</span>
+        <h2>The hospital knows.<br>The crew does not.</h2>
+        <p>Capacity stays inside the building. The ambulance hears it on the radio, if it hears it at all.</p>
+        <span class="scene-chip" style="--c:#CC8A2C"><i></i>Cause · no shared status</span>
       </div>
       <div class="scene">
         <span class="scene-k">03 <b>/ 03</b> Solution</span>
-        <h2>One screen<br>for the whole hospital.</h2>
-        <p>We score each patient, hold a ready bed, and send them to the right place.</p>
-        <span class="scene-chip" style="--c:#3F9142"><i></i>Bed ready · before they arrive</span>
+        <h2>Pre-alert.<br>Bed already held.</h2>
+        <p>Crews see who can take them, send triage and complaint, and the hospital holds a bed before the doors open.</p>
+        <span class="scene-chip" style="--c:#3F9142"><i></i>Right door · first time</span>
       </div>
     </div>
 
@@ -787,7 +788,7 @@ html.pre .dot{scale:0}
                 <rect x="1" y="11.6" width="7.4" height="7.4" rx="1.7" stroke="#202940" stroke-width="1.7"/>
                 <rect x="11.6" y="11.6" width="7.4" height="7.4" rx="1.7" stroke="#202940" stroke-width="1.7"/>
               </svg>
-              <span>Workflow</span>
+              <span>Why</span>
             </a>
             <a class="n-item" href="#impact">
               <svg class="n-ico" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -815,29 +816,29 @@ html.pre .dot{scale:0}
       </div>
 
       <div class="hero-blk">
-        <p class="eyebrow l c sx" style="--x:65.7;--y:-209.2;--sx:0.9293">Hospital emergencies</p>
+        <p class="eyebrow l c sx" style="--x:65.7;--y:-209.2;--sx:0.9293">Ambulance routing</p>
         <h1 class="l c" style="--x:62.6;--y:-167.3">
-          <span class="sx" style="--sx:0.9">See every bed.</span><br>
-          <span class="sx" style="--sx:0.92">Know who is first.</span>
+          <span class="sx" style="--sx:0.9">The right door.</span><br>
+          <span class="sx" style="--sx:0.92">The first time.</span>
         </h1>
         <div class="tagrow">
           <span class="play l c" style="--x:66;--y:34">
             <svg viewBox="0 0 13 14" fill="none" aria-hidden="true"><path d="M1.4 1.3 11.6 7 1.4 12.7z" fill="#0b1526"/></svg>
           </span>
-          <span class="tag l c sx" style="--x:131;--y:48.7;--sx:0.8973">Beds, patients, and where they go.</span>
+          <span class="tag l c sx" style="--x:131;--y:48.7;--sx:0.8973">Who can take them, before they roll.</span>
         </div>
       </div>
 
       <div class="row">
         <div class="stats">
           <div class="stat">
-            <span class="num l b sx" style="--x:64;--y:60.4;--sx:1">90s</span>
-            <span class="lbl l b sx" style="--x:245;--y:73.2;--sx:0.9634">To a<br>ready<br>bed</span>
+            <span class="num l b sx" style="--x:64;--y:60.4;--sx:1">15m</span>
+            <span class="lbl l b sx" style="--x:245;--y:73.2;--sx:0.9634">Who is<br>due at<br>the door</span>
           </div>
           <span class="slash l b" style="--x:418;--y:76"></span>
           <div class="stat">
-            <span class="num l b sx" style="--x:480;--y:60.4;--sx:0.9858">3×</span>
-            <span class="lbl l b sx" style="--x:600;--y:96.7;--sx:0.9209">Less time<br>lost</span>
+            <span class="num l b sx" style="--x:480;--y:60.4;--sx:0.9858">0</span>
+            <span class="lbl l b sx" style="--x:600;--y:96.7;--sx:0.9209">Patient data<br>on the board</span>
           </div>
         </div>
         <a class="meet l b r" style="--x:59;--y:66" href="/app.html">
@@ -859,9 +860,9 @@ html.pre .dot{scale:0}
   <!-- Trust strip -->
   <section class="s-trust">
     <div class="s-wrap">
-      <p>Every team sees the same thing</p>
+      <p>What every ambulance company sees</p>
       <div class="s-units">
-        <span>Emergency</span><span>ICU</span><span>Trauma</span><span>Surgery</span><span>Radiology</span><span>EMS</span>
+        <span>Emergency</span><span>ICU</span><span>Inpatient</span><span>Operating rooms</span><span>Trauma</span><span>Stroke</span>
       </div>
     </div>
   </section>
@@ -872,40 +873,40 @@ html.pre .dot{scale:0}
       <div class="platform-top">
         <div class="platform-copy-box">
           <span class="s-eyebrow">What it does</span>
-          <h2 class="platform-title">Everything in one place</h2>
+          <h2 class="platform-title">Before they pick a door</h2>
         </div>
       </div>
 
       <div class="platform-grid">
         <article class="platform-card">
           <span class="platform-no">01</span>
-          <h3>Live map</h3>
-          <p>Every bed, in 2D and 3D. You see which ones are ready.</p>
+          <h3>Pre-alert</h3>
+          <p>From the road. Triage, complaint, and ETA. The hospital answers before the doors open.</p>
         </article>
         <article class="platform-card">
           <span class="platform-no">02</span>
-          <h3>AI triage</h3>
-          <p>Who is most urgent, in seconds.</p>
+          <h3>Hold a bed</h3>
+          <p>Accept, and that bed is held on the live map. It is not offered to the next arrival.</p>
         </article>
         <article class="platform-card">
           <span class="platform-no">03</span>
-          <h3>Other hospitals</h3>
-          <p>If this one is full, send the patient somewhere with room.</p>
+          <h3>Diversion</h3>
+          <p>One switch. The region, the public board, and every subscribed company see it at once.</p>
         </article>
         <article class="platform-card">
           <span class="platform-no">04</span>
-          <h3>Voice intake</h3>
-          <p>Paramedics speak. A bed is held before they arrive.</p>
+          <h3>Right door</h3>
+          <p>Triage and complaint rank every hospital. Stroke, trauma, and STEMI go where that unit can take them.</p>
         </article>
         <article class="platform-card">
           <span class="platform-no">05</span>
-          <h3>Free a bed</h3>
-          <p>Find stable patients who can move, so critical beds open up.</p>
+          <h3>Every unit</h3>
+          <p>Emergency, ICU, inpatient beds, and operating rooms. Not only whether the ER looks open.</p>
         </article>
         <article class="platform-card">
           <span class="platform-no">06</span>
-          <h3>Supplies</h3>
-          <p>Blood, ventilators, and operating rooms. Alert before they run out.</p>
+          <h3>Open API</h3>
+          <p>No patient data. FHIR for hospital systems. Webhooks so any ambulance company can plug in.</p>
         </article>
       </div>
     </div>
@@ -916,41 +917,41 @@ html.pre .dot{scale:0}
     <div class="s-wrap">
       <header class="s-head center rv">
         <span class="s-eyebrow">Why</span>
-        <h2 class="s-h2">Minutes matter</h2>
-        <p class="s-lede">Radios and whiteboards are too slow when many patients arrive at once.</p>
+        <h2 class="s-h2">The second trip</h2>
+        <p class="s-lede">A radio call does not reach every ambulance company before the truck is already committed.</p>
       </header>
       <div class="s-steps">
         <div class="s-step rv">
           <span class="s-step-n">WHY 01</span>
           <span class="s-step-line" aria-hidden="true"></span>
-          <h3>Nobody sees the same thing</h3>
-          <p>A bed looks open. It still needs cleaning, a nurse, or a machine.</p>
+          <h3>The door looks open</h3>
+          <p>The emergency room can still be accepting while the ICU or the stroke bed this patient needs is full.</p>
         </div>
         <div class="s-step rv">
           <span class="s-step-n">WHY 02</span>
           <span class="s-step-line" aria-hidden="true"></span>
-          <h3>Nurses should treat patients</h3>
-          <p>They should not hunt for beds while new patients arrive.</p>
+          <h3>The truck is rolling</h3>
+          <p>Diversion that arrives after the crew has chosen means the patient has to go somewhere else.</p>
         </div>
         <div class="s-step rv">
           <span class="s-step-n">WHY 03</span>
           <span class="s-step-line" aria-hidden="true"></span>
-          <h3>One view for everyone</h3>
-          <p>Same beds. Same priority. Same next patient.</p>
+          <h3>Many companies, one status</h3>
+          <p>A call to one dispatcher is not a status every crew can read. Publish it once.</p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Cinematic banner -->
-  <section class="s-banner" aria-label="Built for critical care">
+  <section class="s-banner" aria-label="They find out at the bay">
     <video class="s-bgvid" autoplay muted loop playsinline preload="metadata" poster="/videos/surgery.jpg" aria-hidden="true">
       <source src="/videos/surgery.mp4" type="video/mp4"></video>
     <div class="s-bgtint"></div>
     <div class="s-wrap rv">
       <span class="s-eyebrow">The problem</span>
-      <h2>Everyone looks at a different board.</h2>
-      <p>A free bed is not always a ready bed.</p>
+      <h2>They find out at the bay.</h2>
+      <p>A hospital that cannot take them should have said so while they were still on the road.</p>
     </div>
   </section>
 
@@ -959,12 +960,12 @@ html.pre .dot{scale:0}
     <div class="s-wrap s-show">
       <div class="rv">
         <span class="s-eyebrow">The solution</span>
-        <h2 class="s-h2">See the hospital. Act faster.</h2>
-        <p class="s-lede">Ready beds, what is blocking them, and where the next patient goes.</p>
+        <h2 class="s-h2">Send them to a door that can.</h2>
+        <p class="s-lede">Live capacity in every unit, a pre-alert from the road, and a bed held before arrival.</p>
         <ul class="s-list">
-          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Every floor</b>A live 2D plan and a 3D view.</div></li>
-          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Patient in one click</b>Vitals, priority, and what they need.</div></li>
-          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Ask the AI</b>What is running out? Where should this patient go?</div></li>
+          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Every unit</b>Emergency, ICU, inpatient beds, and operating rooms. Not only whether the ER is open.</div></li>
+          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Pre-alert</b>Triage and complaint from the road. Accept, and a bed is held on the map.</div></li>
+          <li><span class="s-check"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4"/></svg></span><div><b>Open to any company</b>A public board with no patient data, plus webhooks when the status changes.</div></li>
         </ul>
         <div class="s-btns">
           <a class="s-btn s-btn-dark" href="/app.html">Open the app <i><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="m6.6 3.6 6 5.4-6 5.4" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></i></a>
@@ -972,7 +973,7 @@ html.pre .dot{scale:0}
       </div>
       <div class="s-mock rv" aria-hidden="true">
         <div class="s-mock-in">
-          <div class="s-mock-bar"><i></i><i></i><i></i><span>Floor 3 · Acute care</span><em>MCI active</em></div>
+          <div class="s-mock-bar"><i></i><i></i><i></i><span>Tiger Region · incoming</span><em class="is-ok">Accepting</em></div>
           <div class="s-mock-body">
             <div class="s-beds">
               <b class="r"></b><b class="y"></b><b class="g"></b><b></b><b class="y"></b><b class="r"></b>
@@ -981,9 +982,9 @@ html.pre .dot{scale:0}
               <b></b><b class="r"></b><b class="g"></b><b class="y"></b><b></b><b class="g"></b>
             </div>
             <div class="s-side">
-              <div class="s-kpi"><small>Occupancy</small><strong>87%</strong><div class="bar"><i style="width:87%"></i></div></div>
-              <div class="s-kpi"><small>ICU beds free</small><strong>2 / 12</strong><div class="bar"><i style="width:17%"></i></div></div>
-              <div class="s-kpi"><small>Diverted</small><strong>9</strong><div class="bar"><i style="width:45%"></i></div></div>
+              <div class="s-kpi"><small>Due in 15 min</small><strong>3</strong><div class="bar"><i style="width:60%"></i></div></div>
+              <div class="s-kpi"><small>ED beds open</small><strong>4</strong><div class="bar"><i style="width:33%"></i></div></div>
+              <div class="s-kpi"><small>ICU open</small><strong>2 / 12</strong><div class="bar"><i style="width:17%"></i></div></div>
             </div>
           </div>
         </div>
@@ -999,14 +1000,14 @@ html.pre .dot{scale:0}
     <div class="s-wrap">
       <header class="s-head rv">
         <span class="s-eyebrow">Why it matters</span>
-        <h2 class="s-h2">Less waiting. More care.</h2>
-        <p class="s-lede">The staff is there. The time gets lost looking for a bed.</p>
+        <h2 class="s-h2">The first door should be the right one.</h2>
+        <p class="s-lede">Minutes disappear when an ambulance arrives somewhere that has to send them on.</p>
       </header>
       <div class="s-metrics">
-        <div class="s-metric rv"><strong>90s</strong><span>To a ready bed</span></div>
-        <div class="s-metric rv"><strong>3×</strong><span>Less time lost</span></div>
-        <div class="s-metric rv"><strong>100%</strong><span>Every bed, one view</span></div>
-        <div class="s-metric rv"><strong>24/7</strong><span>Same answer, every hospital</span></div>
+        <div class="s-metric rv"><strong>15m</strong><span>Who is due at this door, on one screen</span></div>
+        <div class="s-metric rv"><strong>Held</strong><span>A bed, before the doors open</span></div>
+        <div class="s-metric rv"><strong>0</strong><span>Patient records on the public board</span></div>
+        <div class="s-metric rv"><strong>1</strong><span>Status every ambulance company reads</span></div>
       </div>
     </div>
   </section>
@@ -1018,8 +1019,8 @@ html.pre .dot{scale:0}
         <img class="s-bgvid" src="/videos/cta-0926.jpg" alt="" aria-hidden="true">
         <div class="s-bgtint"></div>
         <span class="s-eyebrow">Try it</span>
-        <h2 class="s-h2">See it in action</h2>
-        <p class="s-lede">Open the app and watch patients get a bed.</p>
+        <h2 class="s-h2">Answer the next ambulance</h2>
+        <p class="s-lede">Open the command center. See who is coming, and whether this door can take them.</p>
         <div class="s-btns">
           <a class="s-btn s-btn-dark" href="/app.html">Open app <i><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="m6.6 3.6 6 5.4-6 5.4" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></i></a>
           <a class="s-btn s-btn-ghost" href="#platform">See how it works</a>
@@ -1034,7 +1035,7 @@ html.pre .dot{scale:0}
       <header class="s-head center rv">
         <span class="s-eyebrow">The team</span>
         <h2 class="s-h2">Built at TigerHacks</h2>
-        <p class="s-lede">So hospitals do not lose time to radios and whiteboards.</p>
+        <p class="s-lede">So a crew does not learn the hospital is full when they are already at the door.</p>
       </header>
       <figure class="founders-photo rv">
         <img src="/founders.webp" alt="The SurgeCommand team during the TigerHacks hackathon" loading="lazy">
@@ -1056,7 +1057,7 @@ html.pre .dot{scale:0}
             <img class="brand-mark" src="/logo-tiger.png" alt="">
             <p class="brand-name">SurgeCommand</p>
           </div>
-          <p class="brand-blurb">Real-time command for hospital surges and mass-casualty events. Built at TigerHacks.</p>
+          <p class="brand-blurb">Live hospital capacity for ambulance crews. The right door, the first time. Built at TigerHacks.</p>
           <ul class="contact-list">
             <li>
               <svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V6H4Zm16 2.7-8 5-8-5V18h16V8.7Z"/></svg>
@@ -1076,21 +1077,21 @@ html.pre .dot{scale:0}
         <nav class="col" aria-label="Platform">
           <p class="col-title">Platform</p>
           <ul class="link-list">
-            <li><a href="/app.html">Live Map</a></li>
             <li><a href="/app.html">Overview</a></li>
-            <li><a href="/app.html">Capacity</a></li>
-            <li><a href="/app.html">Patient Flow</a></li>
-            <li><a href="/app.html">Incidents</a></li>
-            <li><a href="/app.html">Command Center</a></li>
+            <li><a href="/app.html">Live Map</a></li>
+            <li><a href="/app.html">Ambulances</a></li>
+            <li><a href="/app.html">Network</a></li>
+            <li><a href="/app.html">Open Data</a></li>
+            <li><a href="/public.html">Public board</a></li>
           </ul>
         </nav>
 
         <nav class="col" aria-label="Product">
           <p class="col-title">Product</p>
           <ul class="link-list">
-            <li><a href="#platform">The Platform</a></li>
-            <li><a href="#how">How It Works</a></li>
-            <li><a href="#platform">Use Cases</a></li>
+            <li><a href="#platform">Before they pick</a></li>
+            <li><a href="#how">The second trip</a></li>
+            <li><a href="/public.html">Public board</a></li>
             <li><a href="#founders">Founders</a></li>
           </ul>
         </nav>
@@ -1107,7 +1108,7 @@ html.pre .dot{scale:0}
 
         <div class="newsletter">
           <p class="col-title">Stay In The Loop</p>
-          <p>Sign up for launch updates, case studies &amp; release notes from the team.</p>
+          <p>Updates when the regional board and the open API for ambulance companies change.</p>
           <form class="subscribe" onsubmit="return false">
             <label class="sr-only" for="nl-email">Email address</label>
             <input id="nl-email" type="email" name="email" placeholder="Leave your email" autocomplete="email" required>

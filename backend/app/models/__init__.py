@@ -196,6 +196,25 @@ class AuditEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CareActivity(Base):
+    """What is being done to a patient right now: the operation in theatre, or the current step of care.
+
+    One row per patient in a bed, kept by app/care.py. A table of its own (no foreign key) so the
+    simulator can admit, move and discharge patients without ever waiting on it.
+    """
+
+    __tablename__ = "care_activities"
+
+    patient_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    room_id: Mapped[str] = mapped_column(String(16))
+    kind: Mapped[str] = mapped_column(String(16))  # "surgery" or "care"
+    title: Mapped[str] = mapped_column(String(120))
+    step: Mapped[int] = mapped_column(Integer, default=0)
+    steps: Mapped[int] = mapped_column(Integer, default=1)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    minutes: Mapped[int] = mapped_column(Integer)
+
+
 class AmbulanceRun(Base):
     """One ambulance transport: the pre-alert, the hospital's answer, arrival and handoff."""
 

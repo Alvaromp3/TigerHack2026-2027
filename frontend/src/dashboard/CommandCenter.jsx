@@ -26,14 +26,18 @@ import { flowBucket } from "./flowBuckets";
 import { buildLiveOps, incidentsFromCensus } from "./liveOps";
 import AmbulancesTab from "./AmbulancesTab";
 import { AppNav } from "./AppBar";
-import NetworkTab from "./NetworkTab";
 import OpenDataTab from "./OpenDataTab";
 import OverviewTab from "./OverviewTab";
+import { roomPhoto } from "./roomPhotos";
+import { loadSnapshot, saveSnapshot } from "./snapshot";
+import NotificationsPanel, { desktopAlertsOn, lastSeenActivity, latestActivityId } from "./NotificationsPanel";
+import AiMark from "./AiMark";
 import { ESI, countdown } from "./network/ems";
-import { bedMix, floorRows, localBriefing } from "./ui";
+import { EtaTrack, bedMix, floorRows, localBriefing } from "./ui";
 import "./dashboard.css";
 import "./exec.css";
 import "./ems.css";
+import "./showcase.css";
 import logo from "./logo.png";
 
 const SFX_BY_DEPARTMENT = {
@@ -253,7 +257,59 @@ function severityWord(status) {
   return "Stable";
 }
 
+// Theatre phases by share of the case done; the case ends when the census moves the patient out.
+const SURGERY_PHASES = [
+  { until: 0.12, label: "Induction" },
+  { until: 0.8, label: "Operating" },
+  { until: 0.95, label: "Closing" },
+  { until: 1.01, label: "Recovery" },
+];
+
+// What is being done to the patient at this moment, from care_activities in the live database.
+function NowDoing({ room, now }) {
+  if (!room.patient || !room.activity) return null;
+  const started = room.activityStartedAt ? new Date(room.activityStartedAt).getTime() : now;
+  const share = Math.min(0.99, Math.max(0, (now - started) / Math.max(60000, (room.activityMinutes || 1) * 60000)));
+  const since = new Date(started).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  if (room.activityKind === "surgery") {
+    const current = SURGERY_PHASES.findIndex((phase) => share < phase.until);
+    return (
+      <section className="rc-now is-surgery" aria-label="Surgery in progress">
+        <header>
+          <span className="rc-now-live"><i />Surgery in progress</span>
+          <small>since {since}</small>
+        </header>
+        <strong>{room.activity}</strong>
+        <p>{[room.physician && `Surgeon ${room.physician}`, room.nurse && `Nurse ${room.nurse.replace(/^RN /, "")}`].filter(Boolean).join(" · ")}</p>
+        <div className="rc-now-bar" role="progressbar" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100}>
+          <i style={{ width: `${share * 100}%` }} />
+        </div>
+        <ol className="rc-now-phases">
+          {SURGERY_PHASES.map((phase, index) => (
+            <li key={phase.label} className={index < current ? "is-done" : index === current ? "is-now" : ""}>{phase.label}</li>
+          ))}
+        </ol>
+      </section>
+    );
+  }
+  return (
+    <section className="rc-now" aria-label="Right now">
+      <header>
+        <span className="rc-now-live is-care"><i />Right now</span>
+        <small>
+          {room.activitySteps > 1 ? `Step ${room.activityStep + 1} of ${room.activitySteps} · ` : ""}since {since}
+        </small>
+      </header>
+      <strong>{room.activity}</strong>
+      <div className="rc-now-bar" role="progressbar" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <i style={{ width: `${share * 100}%` }} />
+      </div>
+    </section>
+  );
+}
+
 function dispositionFor(room, surgeOn) {
+  if (room.kind === "or") return "Recovery after surgery";
   if (room.needsOr) return "Needs OR";
   if (room.status === "critical" || room.status === "warning") return "Must stay";
   const emergency = room.dept === "ed" || room.dept === "trauma";
@@ -303,9 +359,9 @@ function situationFor(room, floor) {
   }
   if (!room.status) {
     return {
-      band: "Loading",
-      tone: "is-support",
-      why: "Waiting for the live census to report this bed.",
+      band: "Connecting",
+      tone: "is-support is-loading",
+      why: "Connecting to the live census. This bed fills in as soon as it reports.",
     };
   }
   if (room.patient) {
@@ -321,7 +377,7 @@ function situationFor(room, floor) {
     const brief = cleaningBrief(room);
     const waiting = room.holdFor ? ` ${room.holdFor} is waiting for this bed.` : "";
     return {
-      band: "Blocked",
+      band: "Turnover",
       tone: "is-blocked",
       why: `${brief.why}${waiting}`,
       owner: brief.owner,
@@ -329,15 +385,18 @@ function situationFor(room, floor) {
     };
   }
   if (room.status === "reserved") {
+    const ambulance = (room.holdFor || "").startsWith("EMS ");
     return {
-      band: "Blocked",
-      tone: "is-blocked",
-      why: `Held for ${room.holdFor || "a patient"}. Not usable until the hold is released.`,
+      band: ambulance ? "Held for ambulance" : "Held",
+      tone: "is-held",
+      why: ambulance
+        ? `Held for ${room.holdFor}. The crew is on the way; the bed is theirs when they arrive.`
+        : `Held for ${room.holdFor || "a patient"}. Not usable until the hold is released.`,
     };
   }
   if (room.status === "blocked") {
     return {
-      band: "Blocked",
+      band: "Out of service",
       tone: "is-blocked",
       why: "This bed is out of service.",
     };
@@ -403,8 +462,21 @@ function Stat({ tone, label, value }) {
   );
 }
 
+// Polling beats: the census and ambulances every 2 s; slower lists every fifth beat (10 s).
+const BEAT_MS = 2000;
+const SLOW_EVERY = 5;
+
+function snapshotAge(at, now) {
+  const minutes = Math.max(0, Math.round((now - at) / 60000));
+  return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`;
+}
+
 export default function CommandCenter() {
-  const [hospital, setHospital] = useState(() => buildHospital());
+  // Last known state from this browser: the first paint is instant while the API wakes up.
+  const [boot] = useState(loadSnapshot);
+  const [hospital, setHospital] = useState(() =>
+    boot?.census?.rooms ? applyCensus(buildHospital(), boot.census.rooms) : buildHospital(),
+  );
   const [incidents, setIncidents] = useState([]);
   const [ops, setOps] = useState(null);
   const [actionNote, setActionNote] = useState("");
@@ -438,6 +510,7 @@ export default function CommandCenter() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fitToken, setFitToken] = useState(0);
   const mapRef = useRef(null);
+  const stageRef = useRef(null);
   const sfxRef = useRef(null);
   const knownFlow = useRef(null);
   const reloadRef = useRef(async () => {});
@@ -465,13 +538,11 @@ export default function CommandCenter() {
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
   const [surgeBusy, setSurgeBusy] = useState("");
-  const [emsRuns, setEmsRuns] = useState([]);
-  const [emsSummary, setEmsSummary] = useState(null);
-  const [emsStatus, setEmsStatus] = useState({ ems_status: "accepting", reason: null });
+  const [emsRuns, setEmsRuns] = useState(() => boot?.runs || []);
+  const [emsSummary, setEmsSummary] = useState(() => boot?.summary || null);
+  const [emsStatus, setEmsStatus] = useState(() => boot?.status || { ems_status: "accepting", reason: null });
   const [focusRunId, setFocusRunId] = useState(null);
-  const [region, setRegion] = useState([]);
-  const [statusOpen, setStatusOpen] = useState(false);
-  const [statusReason, setStatusReason] = useState("");
+  const [region, setRegion] = useState(() => boot?.region || []);
   const seenRuns = useRef(null);
   const allBeds = useMemo(() => censusRooms(hospital), [hospital]);
   const roomIds = useMemo(
@@ -490,7 +561,12 @@ export default function CommandCenter() {
     [emsRuns],
   );
   const pendingRuns = useMemo(() => incoming.filter((run) => run.status === "pending"), [incoming]);
-  const bellCount = openIncidents.length + pendingRuns.length;
+  const arrivedRuns = useMemo(() => incoming.filter((run) => run.status === "arrived"), [incoming]);
+  // The badge counts what needs a person; the dot means there is activity nobody has looked at.
+  const bellCount = openIncidents.length + pendingRuns.length + arrivedRuns.length;
+  const [seenActivity, setSeenActivity] = useState(lastSeenActivity);
+  const [bellRinging, setBellRinging] = useState(false);
+  const unreadActivity = latestActivityId(movements) > seenActivity;
   const emsByRoom = useMemo(() => {
     const map = {};
     for (const run of incoming) {
@@ -531,21 +607,34 @@ export default function CommandCenter() {
 
   useEffect(() => {
     let stop = false;
+    let beat = 0;
+    let lastEventId = null;
+    let inFlight = false;
 
-    async function pull() {
+    // The census every beat; transfers, staff, ops and incidents change slowly and come every
+    // fifth beat. Flow events are incremental: only what is newer than the last one we have.
+    async function pull(force = false) {
+      // A slow server must not stack polls on top of each other.
+      if ((document.hidden || inFlight) && !force) return;
+      inFlight = true;
+      const full = force || beat % SLOW_EVERY === 0;
+      beat += 1;
       try {
-        const [censusRes, transferRes, flowRes, staffRes, opsRes, incidentRes] = await Promise.all([
+        const requests = [
           fetch(apiUrl("/api/census")),
-          fetch(apiUrl("/api/transfers")),
-          fetch(apiUrl("/api/flow")),
-          fetch(apiUrl("/api/staff")),
-          fetch(apiUrl("/api/ops")),
-          fetch(apiUrl("/api/incidents")),
-        ]);
+          fetch(apiUrl(lastEventId == null ? "/api/flow" : `/api/flow?after=${lastEventId}`)),
+        ];
+        if (full) {
+          requests.push(
+            fetch(apiUrl("/api/transfers")),
+            fetch(apiUrl("/api/staff")),
+            fetch(apiUrl("/api/ops")),
+            fetch(apiUrl("/api/incidents")),
+          );
+        }
+        const [censusRes, flowRes, transferRes, staffRes, opsRes, incidentRes] = await Promise.all(requests);
         if (stop) return;
         const census = censusRes.ok ? await censusRes.json() : null;
-        const transferRows = transferRes.ok ? (await transferRes.json()).transfers || [] : [];
-        const staffRows = staffRes.ok ? (await staffRes.json()).staff || [] : [];
         const flowBody = flowRes.ok ? await flowRes.json() : null;
         if (census) {
           setHospital((current) => applyCensus(current, census.rooms));
@@ -553,66 +642,96 @@ export default function CommandCenter() {
           setIncomingNotice(census.incoming_notice || "");
           setCalledPhysicians(census.called_physicians || 0);
           setDivertedCount(census.diverted_count || 0);
-        }
-        if (!stop) {
-          setTransfers(transferRows);
-          setRoster(staffRows);
+          saveSnapshot({ census: { rooms: census.rooms } });
         }
         if (flowBody && !stop) {
-          setMovements(flowBody.events || []);
+          const fresh = flowBody.events || [];
+          if (lastEventId == null) setMovements(fresh);
+          else if (fresh.length) {
+            // Two polls can overlap (a slow reply, a forced refresh): merge by id, never twice.
+            setMovements((current) => {
+              const known = new Set(current.map((item) => item.id));
+              const added = fresh.filter((item) => !known.has(item.id));
+              return added.length ? [...added, ...current].slice(0, 200) : current;
+            });
+          }
+          lastEventId = fresh.reduce((top, item) => Math.max(top, item.id), lastEventId ?? 0);
           setFlowLive(true);
           setFlowSyncedAt(Date.now());
         } else if (!stop) {
           setFlowLive(false);
         }
-        if (!stop && opsRes.ok) {
-          setOps(await opsRes.json());
-        } else if (!stop && census) {
-          setOps(buildLiveOps(census, transferRows, staffRows));
-        }
-        if (!stop && incidentRes.ok) {
-          setIncidents((await incidentRes.json()).incidents || []);
-        } else if (!stop && census) {
-          setIncidents(incidentsFromCensus(census));
-        }
+        if (!full || stop) return;
+        const transferRows = transferRes.ok ? (await transferRes.json()).transfers || [] : [];
+        const staffRows = staffRes.ok ? (await staffRes.json()).staff || [] : [];
+        setTransfers(transferRows);
+        setRoster(staffRows);
+        if (opsRes.ok) setOps(await opsRes.json());
+        else if (census) setOps(buildLiveOps(census, transferRows, staffRows));
+        if (incidentRes.ok) setIncidents((await incidentRes.json()).incidents || []);
+        else if (census) setIncidents(incidentsFromCensus(census));
       } catch {
         if (!stop) setFlowLive(false);
+      } finally {
+        inFlight = false;
       }
     }
 
-    pull();
-    reloadRef.current = pull;
-    const timer = setInterval(pull, 2000);
+    // A tab in the background asks for nothing; coming back refreshes everything at once.
+    function onVisible() {
+      if (!document.hidden) pull(true);
+    }
+
+    pull(true);
+    reloadRef.current = () => pull(true);
+    const timer = setInterval(pull, BEAT_MS);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       stop = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
   useEffect(() => {
     let stop = false;
     let beat = 0;
-    async function pullEms() {
-      const slow = beat % 3 === 0;
+    async function pullEms(force = false) {
+      if (document.hidden && !force) return;
+      const slow = force || beat % SLOW_EVERY === 0;
       beat += 1;
       try {
-        const requests = [fetch(apiUrl("/api/ems/runs?active=true")), fetch(apiUrl("/api/ems/status"))];
-        if (slow) requests.push(fetch(apiUrl("/api/ems/summary")), fetch(apiUrl("/api/public/availability")));
+        // Diversion status changes rarely: it rides with the slow beat, like the summary.
+        const requests = [fetch(apiUrl("/api/ems/runs?active=true"))];
+        if (slow) {
+          requests.push(fetch(apiUrl("/api/ems/status")), fetch(apiUrl("/api/ems/summary")), fetch(apiUrl("/api/public/availability")));
+        }
         const [runsRes, statusRes, summaryRes, regionRes] = await Promise.all(requests);
         if (stop) return;
-        if (runsRes.ok) setEmsRuns((await runsRes.json()).runs || []);
-        if (statusRes.ok) setEmsStatus(await statusRes.json());
-        if (summaryRes?.ok) setEmsSummary(await summaryRes.json());
-        if (regionRes?.ok) setRegion((await regionRes.json()).hospitals || []);
+        const part = {};
+        if (runsRes.ok) {
+          part.runs = (await runsRes.json()).runs || [];
+          part.runsAt = Date.now();
+          setEmsRuns(part.runs);
+        }
+        if (statusRes?.ok) setEmsStatus((part.status = await statusRes.json()));
+        if (summaryRes?.ok) setEmsSummary((part.summary = await summaryRes.json()));
+        if (regionRes?.ok) setRegion((part.region = (await regionRes.json()).hospitals || []));
+        saveSnapshot(part);
       } catch {
         // The census poll reports connectivity; ambulances catch up on the next beat.
       }
     }
-    pullEms();
-    const timer = setInterval(pullEms, 2000);
+    function onVisible() {
+      if (!document.hidden) pullEms(true);
+    }
+    pullEms(true);
+    const timer = setInterval(pullEms, BEAT_MS);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       stop = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -623,9 +742,31 @@ export default function CommandCenter() {
       seenRuns.current = ids;
       return;
     }
-    const fresh = [...ids].some((id) => !seenRuns.current.has(id));
+    const freshRuns = pendingRuns.filter((run) => !seenRuns.current.has(run.id));
+    const fresh = freshRuns.length > 0;
     seenRuns.current = ids;
     if (!fresh) return;
+    setBellRinging(true);
+    setTimeout(() => setBellRinging(false), 1400);
+    if (document.hidden && desktopAlertsOn()) {
+      for (const run of freshRuns.slice(0, 3)) {
+        try {
+          const alert = new window.Notification(`New pre-alert · ESI ${run.esi} ${run.complaint_label}`, {
+            body: `${run.unit} · ${run.agency} · ETA ${countdown(run.eta_seconds)}. Waiting for our answer.`,
+            icon: "/logo.png",
+            tag: `run-${run.id}`,
+          });
+          alert.onclick = () => {
+            window.focus();
+            setFocusRunId(run.id);
+            setNav("ambulances");
+            alert.close();
+          };
+        } catch {
+          // Desktop alerts are optional.
+        }
+      }
+    }
     try {
       const context = new (window.AudioContext || window.webkitAudioContext)();
       [880, 660].forEach((pitch, index) => {
@@ -649,6 +790,7 @@ export default function CommandCenter() {
   useEffect(() => {
     let stop = false;
     async function pullInsights() {
+      if (document.hidden) return;
       try {
         const res = await fetch(apiUrl("/api/insights?minutes=120&bucket=10"));
         if (!stop && res.ok) setInsights(await res.json());
@@ -657,12 +799,17 @@ export default function CommandCenter() {
       }
     }
     pullInsights();
-    const timer = setInterval(pullInsights, 15000);
+    const timer = setInterval(pullInsights, 30000);
     return () => {
       stop = true;
       clearInterval(timer);
     };
   }, []);
+
+  // Each tab opens at the top instead of inheriting the last tab's scroll.
+  useEffect(() => {
+    stageRef.current?.scrollTo({ top: 0 });
+  }, [nav]);
 
   async function refreshBriefing() {
     setBriefing((current) => ({ ...current, loading: true }));
@@ -719,7 +866,6 @@ export default function CommandCenter() {
         setElevatorOpen(false);
         setSearchOpen(false);
         setBellOpen(false);
-        setStatusOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -947,18 +1093,6 @@ export default function CommandCenter() {
     });
   }
 
-  function changeEmsStatus(next) {
-    return surgeStep("ems-status", async () => {
-      const data = await emsAction("/api/ems/status", { ems_status: next, reason: next === "diverting" ? statusReason || "ED at capacity" : null });
-      setEmsStatus(data);
-      setStatusOpen(false);
-      setStatusReason("");
-      return next === "diverting"
-        ? "Tiger Memorial is on diversion. The regional network and ambulance companies see it now."
-        : "Tiger Memorial is accepting ambulances again.";
-    });
-  }
-
   function openRoomById(roomId) {
     openOpsItem({ nav: "live", room_id: roomId });
   }
@@ -1108,40 +1242,6 @@ export default function CommandCenter() {
         />
 
         <div className="ab-tools">
-          <div className="ems-status-wrap">
-            <button
-              type="button"
-              className={emsStatus.ems_status === "diverting" ? "ems-pill is-diverting" : "ems-pill"}
-              aria-expanded={statusOpen}
-              onClick={() => setStatusOpen((open) => !open)}
-            >
-              <i />
-              {emsStatus.ems_status === "diverting" ? "On diversion" : "Accepting ambulances"}
-            </button>
-            {statusOpen && (
-              <div className="ems-status-pop">
-                <strong>Ambulance status</strong>
-                <p>Published to the regional network, the public board and every ambulance company subscribed to alerts.</p>
-                {emsStatus.ems_status === "accepting" ? (
-                  <>
-                    <input
-                      value={statusReason}
-                      onChange={(event) => setStatusReason(event.target.value)}
-                      placeholder="Reason, e.g. ED at capacity"
-                      maxLength={160}
-                    />
-                    <button type="button" className="ems-go is-divert" disabled={Boolean(surgeBusy)} onClick={() => changeEmsStatus("diverting")}>
-                      Go on diversion
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="ems-go" disabled={Boolean(surgeBusy)} onClick={() => changeEmsStatus("accepting")}>
-                    Accept ambulances again
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
           <button type="button" className="ab-search" onClick={() => setSearchOpen(true)} aria-label="Search the hospital">
             <Icon name="search" />
             <span>Search</span>
@@ -1150,21 +1250,19 @@ export default function CommandCenter() {
           <div className="bell-wrap">
             <button
               type="button"
-              className={chatOpen ? "ab-icon is-on" : "ab-icon"}
-              aria-label="Assistant"
+              className={chatOpen ? "ab-ask is-on" : "ab-ask"}
+              aria-label="Ask SurgeCommand AI"
               onClick={() => {
                 setChatOpen((open) => !open);
                 setBellOpen(false);
               }}
             >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M10 2.5 11.8 8.2 17.5 10l-5.7 1.8L10 17.5l-1.8-5.7L2.5 10l5.7-1.8L10 2.5Z" fill="currentColor" />
-              </svg>
+              <AiMark size={22} />
+              <span>Ask AI</span>
             </button>
             <ChatPanel
               open={chatOpen}
               onClose={() => setChatOpen(false)}
-              surgeOn={surgeOn}
               roomIds={roomIds}
               onOpenRoom={(roomId) => {
                 openRoomById(roomId);
@@ -1175,8 +1273,8 @@ export default function CommandCenter() {
           <div className="bell-wrap">
             <button
               type="button"
-              className={bellOpen ? "ab-icon is-on" : "ab-icon"}
-              aria-label="Incidents"
+              className={`ab-icon${bellOpen ? " is-on" : ""}${bellRinging ? " is-ringing" : ""}`}
+              aria-label={bellCount ? `Notifications, ${bellCount} need you` : "Notifications"}
               onClick={() => {
                 setBellOpen((open) => !open);
                 setChatOpen(false);
@@ -1184,47 +1282,31 @@ export default function CommandCenter() {
             >
               <Icon name="bell" />
               {bellCount > 0 && <em>{bellCount}</em>}
+              {!bellCount && unreadActivity && <i className="ab-dot" aria-hidden="true" />}
             </button>
-            {bellOpen && (
-              <div className="bell-pop bell-list">
-                {pendingRuns.length > 0 && (
-                  <>
-                    <strong>Pre-alerts waiting for an answer</strong>
-                    {pendingRuns.map((run) => (
-                      <button
-                        key={run.id}
-                        type="button"
-                        onClick={() => {
-                          setBellOpen(false);
-                          chooseNav("ambulances");
-                        }}
-                      >
-                        <b>ESI {run.esi} · {run.unit}</b>
-                        <span>{run.complaint_label} · ETA {countdown(run.eta_seconds)}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-                <strong>Open incidents</strong>
-                {openIncidents.length === 0 ? (
-                  <p>No bed is blocked by an incident.</p>
-                ) : (
-                  openIncidents.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        setBellOpen(false);
-                        openOpsItem({ nav: "live", room_id: item.room_id });
-                      }}
-                    >
-                      <b>{item.room_id}</b>
-                      <span>{item.title}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
+            <NotificationsPanel
+              open={bellOpen}
+              now={syncTick}
+              pending={pendingRuns}
+              arrived={arrivedRuns}
+              incidents={openIncidents}
+              capacity={homeCapacity}
+              movements={movements}
+              busy={surgeBusy}
+              onClose={() => setBellOpen(false)}
+              onSeen={setSeenActivity}
+              onOpenRun={(run) => {
+                setFocusRunId(run.id);
+                chooseNav("ambulances");
+              }}
+              onAcceptRun={(run) => acceptRun(run)}
+              onHandoffRun={(run) => handoffRun(run)}
+              onOpenRoom={(roomId) => {
+                setBellOpen(false);
+                openRoomById(roomId);
+              }}
+              onOpenOverview={() => chooseNav("overview")}
+            />
           </div>
           <div className="ab-clock">
             <strong>{clock}</strong>
@@ -1278,7 +1360,7 @@ export default function CommandCenter() {
       )}
 
       <div className="workspace">
-        <main className={nav === "live" ? "stage" : "stage is-page"}>
+        <main ref={stageRef} className={nav === "live" ? "stage" : "stage is-page"}>
           {nav === "overview" && (
             <OverviewTab
               now={now}
@@ -1287,7 +1369,6 @@ export default function CommandCenter() {
               onRefreshBriefing={refreshBriefing}
               capacity={homeCapacity}
               incoming={incoming}
-              emsStatus={emsStatus}
               onOpenAmbulances={() => chooseNav("ambulances")}
               onOpenRun={(run) => {
                 setFocusRunId(run.id);
@@ -1309,22 +1390,16 @@ export default function CommandCenter() {
               onOpenRoom={openRoomById}
             />
           )}
-          {nav === "network" && (
-            <NetworkTab
-              onSent={(run) => {
-                setToast(`${run.code} sent to ${run.destination}.`);
-                if (run.destination === "Tiger Memorial") setEmsRuns((current) => [...current, run]);
-              }}
-            />
-          )}
-          {nav === "data" && <OpenDataTab />}
+          {nav === "data" && <OpenDataTab hospital={homeCapacity} incoming={incoming} />}
           {nav !== "live" && (
             <footer className="page-foot">
               <span>
                 <i className={flowLive ? "" : "is-wait"} />
                 {flowLive && flowSyncedAt
                   ? `Live census · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
-                  : "Connecting to the live census…"}
+                  : boot
+                    ? `Showing the last snapshot (${snapshotAge(boot.at, syncTick)}) · reconnecting…`
+                    : "Connecting to the live census…"}
               </span>
               <span>SurgeCommand · Tiger Memorial Hospital</span>
             </footer>
@@ -1350,7 +1425,9 @@ export default function CommandCenter() {
                       <i />
                       {flowLive && flowSyncedAt
                         ? `Live · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
-                        : "Connecting to hospital"}
+                        : boot
+                          ? "Last snapshot · reconnecting"
+                          : "Connecting to hospital"}
                     </span>
                     <div className="floor-seg" role="group" aria-label="Floor">
                       {hospital.map((level) => (
@@ -1565,6 +1642,7 @@ export default function CommandCenter() {
                     onHandoffRun={handoffRun}
                     onOpenRoom={openRoomById}
                     onClose={() => setSelectedId(null)}
+                    now={syncTick}
                   />
                 )}
 
@@ -1572,7 +1650,14 @@ export default function CommandCenter() {
             )}
 
             {hover && (
-              <div className="tip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+              <div
+                className={`tip${hover.y > window.innerHeight - 330 ? " is-up" : ""}${hover.x > window.innerWidth - 320 ? " is-left" : ""}`}
+                style={{
+                  left: hover.x + (hover.x > window.innerWidth - 320 ? -14 : 14),
+                  top: hover.y + (hover.y > window.innerHeight - 330 ? -14 : 14),
+                }}
+              >
+                {roomPhoto(hover.room) && <img className="tip-photo" src={roomPhoto(hover.room)} alt="" />}
                 <div className="tip-head">
                   <strong>{hover.room.id}</strong>
                   {hover.room.status && STATUS[hover.room.status] && (
@@ -1597,6 +1682,12 @@ export default function CommandCenter() {
                       </span>
                     )}
                     {hover.room.nurse && <span>Nurse · {hover.room.nurse}</span>}
+                    {hover.room.activity && (
+                      <span className={hover.room.activityKind === "surgery" ? "tip-now is-surgery" : "tip-now"}>
+                        {hover.room.activityKind === "surgery" ? "In surgery · " : "Now · "}
+                        {hover.room.activity}
+                      </span>
+                    )}
                   </div>
                 )}
                 {hover.room.status === "reserved" && hover.room.holdFor && (
@@ -1734,6 +1825,7 @@ function RoomCard({
   onHandoffRun,
   onOpenRoom,
   onClose,
+  now = Date.now(),
 }) {
   const vitals = vitalsFor(room);
   const history = historyFor(room, movements);
@@ -1748,38 +1840,78 @@ function RoomCard({
   const stay = occupied ? stayLabel(room.stayTicks) : null;
   const charge = lookupStaff(staff, room.charge, room.id);
   const turnover = room.status === "cleaning" ? turnoverPlan(room, queuePlace) : null;
+  const photo = roomPhoto(room);
 
   return (
     <div>
-      <div className="detail-head">
-        <div>
-          <h2>{room.id}</h2>
-          <p className="overview-sub">
-            {room.deptLabel} · {floor.name}
-          </p>
-        </div>
-        <div className="head-actions">
-          {room.status && (
-            <span className="pill" style={{ color: STATUS[room.status].color }}>
-              <i style={{ background: STATUS[room.status].color }} />
-              {STATUS[room.status].label}
+      {photo ? (
+        <div className="rc-photo" key={room.id}>
+          <img src={photo} alt={`${room.type || room.deptLabel}, ${floor.name}`} />
+          <div className="rc-photo-top">
+            <span className="rc-where">
+              <i aria-hidden="true" />
+              {floor.name} · {room.deptLabel}
             </span>
-          )}
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close room">
-            ×
-          </button>
+            <button type="button" className="rc-photo-close" onClick={onClose} aria-label="Close room">
+              ×
+            </button>
+          </div>
+          <div className="rc-photo-foot">
+            <div>
+              <h2>{room.id}</h2>
+              <p>{room.type || room.deptLabel}</p>
+            </div>
+            {room.status && (
+              <span className={`rc-photo-pill is-${room.status}`} style={{ "--c": STATUS[room.status].color }}>
+                <i />
+                {STATUS[room.status].label}
+              </span>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="detail-head">
+          <div>
+            <h2>{room.id}</h2>
+            <p className="overview-sub">
+              {room.deptLabel} · {floor.name}
+            </p>
+          </div>
+          <div className="head-actions">
+            {room.status && (
+              <span className="pill" style={{ color: STATUS[room.status].color }}>
+                <i style={{ background: STATUS[room.status].color }} />
+                {STATUS[room.status].label}
+              </span>
+            )}
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close room">
+              ×
+            </button>
+          </div>
+        </div>
+      )}
 
       {emsRun ? (
         <div className="rc-ems" style={{ "--esi": ESI[emsRun.esi]?.color, "--esi-soft": ESI[emsRun.esi]?.soft }}>
           <div className="rc-ems-top">
             <span className="esi-badge" style={{ "--esi": ESI[emsRun.esi]?.color, "--esi-soft": ESI[emsRun.esi]?.soft }}>ESI {emsRun.esi}</span>
-            <strong>{emsRun.status === "arrived" ? "Ambulance at the EMS bay" : "Ambulance on the way"}</strong>
+            <strong>
+              {emsRun.status === "arrived"
+                ? "Ambulance at the EMS bay"
+                : emsRun.status === "pending"
+                  ? "Suggested for an ambulance"
+                  : "Ambulance on the way"}
+            </strong>
             <b>{emsRun.status === "arrived" ? "Here" : countdown(emsRun.eta_seconds)}</b>
           </div>
           <p>{emsRun.unit} · {emsRun.complaint_label} · {emsRun.summary}</p>
           <div className="rc-ems-needs">{emsRun.needs.map((need) => <span key={need}>{need}</span>)}</div>
+          <EtaTrack run={emsRun} />
+          {emsRun.status === "pending" && room.status === "available" && (
+            <button type="button" className="amb-accept" disabled={Boolean(busy)} onClick={() => onAcceptRun?.(emsRun, room.id)}>
+              Accept &amp; hold {room.id}
+            </button>
+          )}
           {emsRun.status === "arrived" && (
             <button type="button" className="amb-accept" disabled={Boolean(busy)} onClick={() => onHandoffRun?.(emsRun)}>
               Handoff complete → {room.id}
@@ -1789,7 +1921,7 @@ function RoomCard({
       ) : (
         <div className="bed-id">
           <span className="mono">Location/{room.id}</span>
-          <span>{room.type}</span>
+          {photo ? <span>{room.census ? "Live census bed" : "Support space"}</span> : <span>{room.type}</span>}
           <span>{floor.code}</span>
         </div>
       )}
@@ -1838,6 +1970,8 @@ function RoomCard({
               </div>
             )}
           </div>
+
+          <NowDoing room={room} now={now} />
 
           {incidents.map((item) => (
             <div key={item.id} className="rc-incident">
@@ -1966,6 +2100,9 @@ function RoomCard({
                 <strong>{room.chiefComplaint || "Complaint not documented"}</strong>
                 <span>{room.diagnosis || "Working diagnosis pending"}</span>
               </div>
+              <Meta label="Right now">
+                {room.activity ? `${room.activityKind === "surgery" ? "In surgery: " : ""}${room.activity}` : "—"}
+              </Meta>
               <Meta label="Acuity">{esiFor(room.status)}</Meta>
               <Meta label="Disposition">{dispositionFor(room, surgeOn)}</Meta>
               <Meta label="Attending">{attending ? `${attending.name} · ${attending.detail}` : "—"}</Meta>

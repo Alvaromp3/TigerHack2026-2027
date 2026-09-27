@@ -1,15 +1,17 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { apiUrl } from "../api/client";
+import AiMark from "./AiMark";
 
-const PROMPTS = [
-  "Which ambulances are coming, and are their beds ready?",
-  "Where should an ESI 2 stroke from the East zone go?",
-  "Which units have open beds right now?",
+const SUGGESTIONS = [
+  { title: "Ambulances", text: "Which ambulances are coming, and which still need an answer?" },
+  { title: "Next bed", text: "Which ED bed should the next ESI 2 ambulance get?" },
+  { title: "Capacity", text: "How many beds are open in each unit right now?" },
+  { title: "Bottlenecks", text: "What is keeping beds closed right now?" },
 ];
 
 const ROOM_TOKEN = /\b[A-Z]{2,5}-[A-Z0-9]{1,3}\b/g;
 
-// **bold** only; the assistant is told to keep formatting light.
+// **bold** only; the assistant keeps formatting light.
 function inline(text) {
   return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
     part.startsWith("**") && part.endsWith("**")
@@ -22,9 +24,15 @@ function Reply({ text }) {
   const blocks = [];
   let list = null;
   for (const raw of text.split("\n")) {
-    const line = raw.trim();
+    const line = raw.trim().replace(/^#{1,4}\s+/, "");
     if (!line) {
       list = null;
+      continue;
+    }
+    const next = line.match(/^\**next:?\**:?\s*(.*)$/i);
+    if (next) {
+      list = null;
+      blocks.push({ next: next[1] });
       continue;
     }
     const bullet = line.match(/^([-*•]|\d+\.)\s+(.*)$/);
@@ -39,32 +47,39 @@ function Reply({ text }) {
       blocks.push({ line });
     }
   }
-  return blocks.map((block, index) =>
-    block.list ? (
-      <ul key={index}>{block.list.map((item, row) => <li key={row}>{inline(item)}</li>)}</ul>
-    ) : (
-      <span key={index} className="assist-line">{inline(block.line)}</span>
-    ),
-  );
+  return blocks.map((block, index) => {
+    if (block.list) return <ul key={index}>{block.list.map((item, row) => <li key={row}>{inline(item)}</li>)}</ul>;
+    if (block.next !== undefined) {
+      return (
+        <p key={index} className="assist-next">
+          <span>Next</span>
+          {inline(block.next)}
+        </p>
+      );
+    }
+    return <p key={index} className="assist-line">{inline(block.line)}</p>;
+  });
 }
 
-export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onOpenRoom }) {
+export default function ChatPanel({ open, onClose, roomIds, onOpenRoom }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [offline, setOffline] = useState(false);
+  const [status, setStatus] = useState({ configured: true, model: "" });
   const logRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     let stop = false;
     fetch(apiUrl("/api/chat/status"))
       .then((res) => (res.ok ? res.json() : null))
       .then((body) => {
-        if (!stop && body) setOffline(!body.configured);
+        if (!stop && body) setStatus(body);
       })
       .catch(() => {});
+    setTimeout(() => inputRef.current?.focus(), 150);
     return () => {
       stop = true;
     };
@@ -77,7 +92,7 @@ export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onO
   async function ask(text) {
     const question = text.trim();
     if (!question || busy) return;
-    const next = [...messages, { role: "user", content: question }];
+    const next = [...messages, { role: "user", content: question, at: new Date() }];
     setMessages(next);
     setDraft("");
     setBusy(true);
@@ -86,14 +101,14 @@ export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onO
       const res = await fetch(apiUrl("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.slice(-12) }),
+        body: JSON.stringify({ messages: next.slice(-12).map(({ role, content }) => ({ role, content })) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(typeof body.detail === "string" ? body.detail : "The assistant could not answer.");
         return;
       }
-      setMessages([...next, { role: "assistant", content: body.reply }]);
+      setMessages([...next, { role: "assistant", content: body.reply, at: new Date() }]);
     } catch {
       setError("The assistant could not be reached. The server may be waking up; try again in a few seconds.");
     } finally {
@@ -107,77 +122,110 @@ export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onO
   }
 
   if (!open) return null;
+  const time = (at) => at?.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   return (
-    <div className="assist-pop" role="dialog" aria-label="Operations assistant" data-demo="chat">
-      <header>
-        <span className="assist-mark" aria-hidden="true">
-          <svg viewBox="0 0 20 20" fill="none">
-            <path d="M10 2.5 11.8 8.2 17.5 10l-5.7 1.8L10 17.5l-1.8-5.7L2.5 10l5.7-1.8L10 2.5Z" fill="currentColor" />
-          </svg>
-        </span>
+    <div className="assist-sheet" role="dialog" aria-label="SurgeCommand AI">
+      <header className="assist-head">
+        <AiMark size={38} className="assist-logo" />
         <div className="assist-title">
-          <strong>Ops assistant</strong>
-          <small>{offline ? "Offline · API key missing on server" : "Reads the live census · Gemini"}</small>
+          <strong>SurgeCommand AI</strong>
+          <small>
+            <i className={status.configured ? "is-on" : ""} />
+            {status.configured ? "Reads the live database · 10 tables" : "Offline · API key missing on the server"}
+          </small>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close assistant">×</button>
+        {messages.length > 0 && (
+          <button type="button" className="assist-clear" onClick={() => { setMessages([]); setError(""); }}>
+            New chat
+          </button>
+        )}
+        <button type="button" className="assist-close" onClick={onClose} aria-label="Close assistant">×</button>
       </header>
-      <div className="assist-log" ref={logRef}>
+
+      <div className="assist-thread" ref={logRef}>
         {messages.length === 0 && (
-          <div className="assist-intro">
-            <strong>Ask the hospital.</strong>
-            <span>Answers come from the live census. Every bed it names becomes a button to the map.</span>
+          <div className="assist-welcome">
+            <AiMark size={68} className="assist-logo is-big" />
+            <h3>Ask the hospital anything.</h3>
+            <p>Beds in every unit, patients and vitals, ambulances on the way, staff and cleaning. Every bed it names becomes a button to the live map.</p>
+            <div className="assist-cards">
+              {SUGGESTIONS.map((item) => (
+                <button key={item.title} type="button" onClick={() => ask(item.text)} disabled={busy}>
+                  <small>{item.title}</small>
+                  <span>{item.text}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((message, index) => {
           if (message.role === "user") {
-            return <p key={index} className="is-user">{message.content}</p>;
+            return (
+              <div key={index} className="msg msg-user">
+                <p>{message.content}</p>
+                <time>{time(message.at)}</time>
+              </div>
+            );
           }
           const rooms = roomsIn(message.content);
           return (
-            <div key={index} className="is-assistant">
-              <Reply text={message.content} />
-              {rooms.length > 0 && onOpenRoom && (
-                <div className="assist-rooms">
-                  {rooms.slice(0, 4).map((id) => (
-                    <button key={id} type="button" onClick={() => onOpenRoom(id)}>
-                      Go to {id}
-                      <svg viewBox="0 0 12 12" aria-hidden="true">
-                        <path d="m4.5 2.5 3.5 3.5-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div key={index} className="msg msg-ai">
+              <AiMark size={30} className="assist-logo" />
+              <div className="msg-body">
+                <Reply text={message.content} />
+                {rooms.length > 0 && onOpenRoom && (
+                  <div className="assist-rooms">
+                    {rooms.slice(0, 4).map((id) => (
+                      <button key={id} type="button" onClick={() => onOpenRoom(id)}>
+                        Go to {id}
+                        <svg viewBox="0 0 12 12" aria-hidden="true">
+                          <path d="m4.5 2.5 3.5 3.5-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <time>{time(message.at)}</time>
+              </div>
             </div>
           );
         })}
         {busy && (
-          <p className="is-assistant is-typing" aria-label="Thinking">
-            <i /><i /><i />
-          </p>
+          <div className="msg msg-ai">
+            <AiMark size={30} thinking className="assist-logo" />
+            <div className="msg-body is-typing" aria-label="Thinking"><i /><i /><i /><span>Reading the live database…</span></div>
+          </div>
         )}
-        {error && <p className="is-error">{error}</p>}
+        {error && <p className="assist-error">{error}</p>}
       </div>
-      <div className="assist-prompts">
-        {(surgeOn ? ["What is coming in?", ...PROMPTS] : PROMPTS).map((prompt) => (
-          <button key={prompt} type="button" onClick={() => ask(prompt)} disabled={busy}>
-            {prompt}
-          </button>
-        ))}
-      </div>
-      <form onSubmit={(event) => {
-        event.preventDefault();
-        ask(draft);
-      }}>
+
+      {messages.length > 0 && (
+        <div className="assist-chips">
+          {SUGGESTIONS.slice(0, 3).map((item) => (
+            <button key={item.title} type="button" onClick={() => ask(item.text)} disabled={busy}>{item.title}</button>
+          ))}
+        </div>
+      )}
+      <form
+        className="assist-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          ask(draft);
+        }}
+      >
         <input
+          ref={inputRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask about beds, patients, or staff"
+          placeholder="Ask about beds, ambulances, patients or staff"
           aria-label="Message"
         />
-        <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+        <button type="submit" disabled={busy || !draft.trim()} aria-label="Send">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 10h12M10.5 4.5 16 10l-5.5 5.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
       </form>
+      <p className="assist-foot">Synthetic demo data · answers use only what is in the database</p>
     </div>
   );
 }

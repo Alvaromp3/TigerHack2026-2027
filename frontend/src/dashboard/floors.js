@@ -563,6 +563,13 @@ export function applyCensus(hospital, rooms) {
         respiratoryRate: occupied ? live.respiratory_rate ?? null : null,
         temperature: occupied ? live.temperature ?? null : null,
         stayTicks: occupied ? live.stay_ticks ?? null : null,
+        // What is being done right now (care_activities): the operation in theatre or the step of care.
+        activity: occupied ? live.activity || null : null,
+        activityKind: occupied ? live.activity_kind || null : null,
+        activityStartedAt: occupied ? live.activity_started_at || null : null,
+        activityMinutes: occupied ? live.activity_minutes ?? null : null,
+        activityStep: occupied ? live.activity_step ?? null : null,
+        activitySteps: occupied ? live.activity_steps ?? null : null,
         cleanType: live.status === "cleaning" ? live.clean_type || null : null,
         cleanPriority: live.status === "cleaning" ? live.clean_priority ?? null : null,
         ticksLeft: live.status === "cleaning" ? live.ticks_left ?? null : null,

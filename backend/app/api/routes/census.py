@@ -2,15 +2,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app import care
 from app.db import get_db
 from app.models import FlowEvent, HospitalState, Housekeeper, LinenAide, Room, Staff, Transfer
 
 router = APIRouter()
 
 
-def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | None = None):
+def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | None = None, activity=None):
     patient = room.patient
     return {
+        **care.payload(activity if patient else None, room.id),
         "id": room.id,
         "floor_id": room.floor_id,
         "kind": room.kind,
@@ -58,7 +60,11 @@ def _rooms(db: Session):
     rows = db.scalars(select(Room).options(selectinload(Room.patient)).order_by(Room.id)).all()
     _, by_keeper = _keeper_names(db)
     _, by_aide = _aide_names(db)
-    return [_room_payload(room, by_keeper.get(room.id), by_aide.get(room.id)) for room in rows]
+    activities = care.by_patient(db)
+    return [
+        _room_payload(room, by_keeper.get(room.id), by_aide.get(room.id), activities.get(room.patient.id) if room.patient else None)
+        for room in rows
+    ]
 
 
 @router.get("/census")
@@ -88,7 +94,8 @@ def operating_rooms(db: Session = Depends(get_db)):
     rows = db.scalars(
         select(Room).options(selectinload(Room.patient)).where(Room.kind == "or").order_by(Room.id)
     ).all()
-    return {"rooms": [_room_payload(room) for room in rows]}
+    activities = care.by_patient(db)
+    return {"rooms": [_room_payload(room, activity=activities.get(room.patient.id) if room.patient else None) for room in rows]}
 
 
 @router.get("/transfers")
@@ -120,8 +127,11 @@ def _flow_payload(row: FlowEvent):
 
 
 @router.get("/flow")
-def flow(q: str | None = None, db: Session = Depends(get_db)):
+def flow(q: str | None = None, after: int | None = None, db: Session = Depends(get_db)):
     stmt = select(FlowEvent).order_by(FlowEvent.id.desc())
+    if after is not None:
+        # Polling screens ask only for what is new since the last event they have.
+        stmt = stmt.where(FlowEvent.id > after)
     needle = (q or "").strip()
     if needle:
         like = f"%{needle}%"

@@ -5,12 +5,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
+from app import care
 from app import ems as ems_engine
 from app.api.routes import auth, census, chat, decisions, ems, fhir, health, incidents, insights, ops, platform, public, rooms, root
 from app.core.config import settings
+from app.crew import ensure_cleaning_crew
 from app.db import SessionLocal, init_db
 from app.infra import VERSION, metrics
+from app.infra.cache import PollCache
+from app.infra.indexes import ensure_indexes
 from app.infra.webhooks import dispatch_pending
 from app.sim import TICK_SECONDS, tick, tick_seconds
 
@@ -18,6 +23,7 @@ log = logging.getLogger(__name__)
 
 WEBHOOK_INTERVAL_SECONDS = 3
 EMS_INTERVAL_SECONDS = 5
+CARE_INTERVAL_SECONDS = 15
 
 TAGS = [
     {"name": "Health", "description": "Service health for load balancers and monitors."},
@@ -86,13 +92,42 @@ async def _ems_loop():
             log.exception("ambulance tick failed")
 
 
+def _care_step():
+    with SessionLocal() as db:
+        care.refresh(db)
+
+
+async def _care_loop():
+    while True:
+        await asyncio.sleep(CARE_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(_care_step)
+        except Exception:
+            log.exception("care activity refresh failed")
+
+
+def _prepare():
+    """Speed and staffing that older databases are missing; each step is safe to repeat."""
+    ensure_indexes()
+    try:
+        with SessionLocal() as db:
+            added = ensure_cleaning_crew(db)
+            if added:
+                log.info("added %s cleaning staff", added)
+        _care_step()
+    except Exception:
+        log.exception("startup top-up failed; the census still runs")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await asyncio.to_thread(init_db)
+    await asyncio.to_thread(_prepare)
     tasks = [
         asyncio.create_task(_census_loop()),
         asyncio.create_task(_webhook_loop()),
         asyncio.create_task(_ems_loop()),
+        asyncio.create_task(_care_loop()),
     ]
     yield
     for task in tasks:
@@ -118,9 +153,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Starlette wraps the last middleware added around the others: CORS, then gzip, then the poll cache.
+app.add_middleware(PollCache)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

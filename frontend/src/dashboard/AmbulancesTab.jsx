@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiUrl } from "../api/client";
 import { earlyWarning } from "./insights";
 import { ESI, clockTime, countdown, secondsUntil, useNow } from "./network/ems";
-import { Card, Kpi, PageHead } from "./ui";
+import { Card, EtaTrack, HeroStat, NO_ANSWER_LEAD_SECONDS, PageHero } from "./ui";
 
 const STATUS_LABEL = {
   pending: "Awaiting answer",
@@ -22,9 +22,39 @@ function EsiBadge({ esi, large }) {
   );
 }
 
+// Photo of the kind of bed being held, from /public/rooms.
+function bedLook(id) {
+  if (!id) return { src: "/rooms/resus.png", kind: "No bed chosen" };
+  if (/^(ED|ER)-T/.test(id)) return { src: "/rooms/trauma.png", kind: "Trauma bay" };
+  if (id.startsWith("FAST-")) return { src: "/rooms/triage.png", kind: "Fast track" };
+  if (id.startsWith("OBS-")) return { src: "/rooms/medsurg.png", kind: "Observation" };
+  return { src: "/rooms/ed-exam.png", kind: "Emergency exam room" };
+}
+
+function BedVisual({ id, label }) {
+  const look = bedLook(id);
+  return (
+    <div className="bed-visual">
+      <img src={look.src} alt="" />
+      <div>
+        <small>{label}</small>
+        <strong>{id || "—"}</strong>
+        <span>{look.kind}</span>
+      </div>
+    </div>
+  );
+}
+
 function offload(seconds) {
   if (seconds == null) return "—";
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+// Big number, small units, so it fits a hero tile: 1m 01s.
+function OffloadValue({ seconds }) {
+  const whole = Math.round(seconds);
+  if (whole < 60) return <>{whole}<small>s</small></>;
+  return <>{Math.floor(whole / 60)}<small>m</small> {String(whole % 60).padStart(2, "0")}<small>s</small></>;
 }
 
 function Timeline({ run }) {
@@ -107,27 +137,31 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
   const bedOptions = selected?.bed_id && !openBeds.includes(selected.bed_id) ? [selected.bed_id, ...openBeds] : openBeds;
 
   return (
-    <div className="page">
-      <PageHead
+    <div className="page has-hero amb2">
+      <PageHero
+        video="/videos/ambulance.mp4"
+        poster="/videos/ambulance.jpg"
+        position="center 62%"
         kicker="Ambulances"
         title="Who is coming, and what do they need?"
-        sub="Crews pre-alert the hospital from the road. Accept and a bed is held on the live map before the doors open."
-      />
-
-      <div className="kpi-row">
-        <Kpi icon="transfer" label="En route" value={summary?.en_route ?? "—"} note={`${summary?.pending ?? 0} waiting for an answer`} tone={summary?.pending ? "warn" : undefined} loading={!summary} />
-        <Kpi icon="clock" label="Arriving < 10 min" value={summary?.arriving_10 ?? "—"} note={`${summary?.at_bay ?? 0} at the EMS bay now`} loading={!summary} />
-        <Kpi icon="in" label="Avg offload time" value={summary?.offload_avg_seconds != null ? offload(summary.offload_avg_seconds) : "—"} note="arrival → patient in a bed" loading={!summary} />
-        <Kpi icon="out" label="Diverted · 24 h" value={summary?.diverted_24h ?? "—"} note={`${summary?.arrivals_24h ?? 0} arrivals handed off`} loading={!summary} />
-      </div>
+        sub="Crews pre-alert us from the road with triage and vitals. We answer, a bed is held on the live map, and the doors are ready when they arrive."
+      >
+        <div className="hero-stats">
+          <HeroStat value={summary?.en_route ?? "—"} label="On the way" />
+          <HeroStat value={summary?.pending ?? "—"} label="Waiting for our answer" tone={summary?.pending ? "alert" : undefined} />
+          <HeroStat value={summary?.offload_avg_seconds != null ? <OffloadValue seconds={summary.offload_avg_seconds} /> : "—"} label="Avg offload time" />
+          <HeroStat value={summary?.arrivals_24h ?? "—"} label="Arrivals today" />
+        </div>
+      </PageHero>
 
       <div className="amb-grid">
         <section className="card amb-queue">
           <header className="card-head">
             <div className="card-titles">
-              <p className="card-kicker">Incoming</p>
+              <p className="card-kicker">Incoming · live</p>
               <h2>{queue.length ? `${queue.length} ambulances` : "No ambulance on the way"}</h2>
             </div>
+            <span className="amb-live"><i />Live</span>
           </header>
           <ul>
             {queue.map((run) => {
@@ -137,7 +171,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                   <button
                     type="button"
                     className={`amb-row is-${run.status}${selected?.id === run.id ? " is-on" : ""}`}
-                    style={{ "--esi": ESI[run.esi]?.color }}
+                    style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}
                     onClick={() => setSelectedId(run.id)}
                   >
                     <EsiBadge esi={run.esi} />
@@ -149,6 +183,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                       <b>{run.status === "arrived" ? "Here" : countdown(left)}</b>
                       <small>{STATUS_LABEL[run.status]}</small>
                     </span>
+                    <EtaTrack run={run} left={left} />
                   </button>
                 </li>
               );
@@ -175,7 +210,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
 
               <div className="amb-sections">
                 <div>
-                  <p className="card-kicker">Patient · field vitals</p>
+                  <p className="card-kicker">Patient · vitals from the ambulance</p>
                   <p className="amb-patient">{selected.patient_name}{selected.age ? `, ${selected.age}` : ""}</p>
                   {warning && (
                     <div className="rc-vitals">
@@ -188,16 +223,39 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                     </div>
                   )}
                   {warning && <p className={`amb-news is-${warning.level}`}>NEWS {warning.total} · {warning.advice}</p>}
-                </div>
-                <div>
-                  <p className="card-kicker">Needs on arrival</p>
+                  <p className="card-kicker amb-needs-title">Needs on arrival</p>
                   <div className="amb-needs">
                     {selected.needs.map((need) => <span key={need}>{need}</span>)}
                   </div>
+                </div>
+                <div>
+                  {selected.status === "arrived" ? (
+                    <div className="bed-visual is-bay">
+                      <img src="/rooms/ems.png" alt="" />
+                      <div>
+                        <small>Now</small>
+                        <strong>At the EMS bay</strong>
+                        <span>Bed {selected.bed_id} is waiting</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <BedVisual
+                      id={selected.status === "pending" ? bedChoice : selected.bed_id}
+                      label={selected.status === "pending" ? "Bed we would hold" : "Bed held"}
+                    />
+                  )}
                   <Timeline run={selected} />
                 </div>
               </div>
 
+              {selected.status === "pending" && (
+                <p className="amb-deadline">
+                  <i aria-hidden="true" />
+                  Nothing is accepted automatically. The crew waits for our answer for another{" "}
+                  <b>{countdown(Math.max(0, secondsUntil(selected.eta_at, now) - NO_ANSWER_LEAD_SECONDS))}</b>, then takes
+                  the patient to the next hospital.
+                </p>
+              )}
               <footer className="amb-actions">
                 {selected.status === "pending" && (
                   <>
@@ -244,6 +302,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
             </>
           ) : (
             <div className="amb-empty">
+              <img src="/rooms/ems.png" alt="" />
               <strong>All quiet on the road.</strong>
               <span>When a crew sends a pre-alert you will hear a chime and see it here, with a bed already suggested.</span>
             </div>
@@ -251,7 +310,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
         </section>
       </div>
 
-      <Card kicker="Today" title="Recent arrivals and diversions" icon="list">
+      <Card kicker="Today" title="Recent arrivals and diversions" icon="list" className="amb-recent">
         <table className="amb-table">
           <thead>
             <tr><th>Run</th><th>ESI</th><th>Complaint</th><th>Outcome</th><th>Offload</th><th>Decided by</th></tr>
@@ -264,7 +323,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                 <td>{run.complaint_label}</td>
                 <td>{run.status === "diverted" ? `Diverted → ${run.diverted_to}` : `In ${run.bed_id}`}</td>
                 <td>{run.status === "handed_off" ? offload(run.offload_seconds) : "—"}</td>
-                <td>{run.decided_by || "—"}</td>
+                <td className={run.decided_by === "No answer" ? "amb-noanswer" : ""}>{run.decided_by === "auto" ? "Autopilot" : run.decided_by || "—"}</td>
               </tr>
             ))}
             {!recent.length && <tr><td colSpan={6} className="empty-note">No completed runs yet today.</td></tr>}

@@ -10,7 +10,7 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import sim
@@ -19,7 +19,12 @@ from app.models import AmbulanceRun, FacilityStatus, Patient, Room
 
 HOME = "Tiger Memorial"
 ACTIVE = ("pending", "accepted", "arrived")
-AUTO_RESPONSE_SECONDS = 60
+# Only people accept an ambulance. A crew waits for our answer until it is this close,
+# then takes the patient to the next hospital; the run records who "decided": nobody.
+NO_ANSWER_LEAD_SECONDS = 60
+NO_ANSWER = "No answer"
+# The demo always has at least this many ambulances heading to Tiger Memorial.
+MIN_INCOMING = 3
 AUTO_HANDOFF_SECONDS = 45
 GENERATE_EVERY = (90, 150)
 
@@ -96,6 +101,14 @@ COMPLAINT_LABEL = {
     "respiratory": "Respiratory distress",
     "general": "General medical",
 }
+# What the crew calls it, by triage level (ESI 1-2, ESI 3, ESI 4-5): an ESI 4 is never a "STEMI".
+LEVEL_LABELS = {
+    "trauma": ("Major trauma", "Trauma", "Minor injury"),
+    "stroke": ("Suspected stroke", "Neuro symptoms", "Neuro symptoms"),
+    "cardiac": ("Chest pain / STEMI", "Chest pain", "Chest pain, low risk"),
+    "respiratory": ("Respiratory distress", "Shortness of breath", "Minor respiratory"),
+    "general": ("Medical emergency", "General medical", "General medical"),
+}
 SUMMARIES = {
     "trauma": (
         "Motor vehicle collision, suspected femur fracture",
@@ -123,6 +136,40 @@ SUMMARIES = {
         "Dizziness and dehydration, tolerating fluids",
     ),
 }
+# The sickest calls get the sickest stories, and minor calls minor ones.
+URGENT_SUMMARIES = {
+    "trauma": SUMMARIES["trauma"],
+    "stroke": SUMMARIES["stroke"],
+    "cardiac": SUMMARIES["cardiac"][:2],
+    "respiratory": (
+        "COPD exacerbation, increased work of breathing",
+        "Pneumonia symptoms, SpO2 low on room air",
+        "Severe asthma attack not responding to nebulizer",
+    ),
+    "general": (
+        "Found unresponsive at home, GCS 9",
+        "Suspected sepsis: fever, confusion, low blood pressure",
+        "Syncope with low blood pressure, not fully alert",
+    ),
+}
+MID_SUMMARIES = {
+    "trauma": ("Motor vehicle collision, suspected femur fracture", "Fall down stairs, wrist deformity, stable vitals"),
+    "stroke": ("Dizziness and unsteady walking since this morning", "Headache and blurred vision, neuro exam normal"),
+    "cardiac": ("Palpitations and near-syncope, HR irregular", "Chest tightness on exertion, settled with rest"),
+    "respiratory": ("Asthma attack improving after nebulizer", "Pneumonia symptoms, mildly low oxygen"),
+    "general": SUMMARIES["general"],
+}
+MINOR_SUMMARIES = {
+    "trauma": ("Ankle injury after a fall, walking with help", "Forearm laceration from kitchen knife, bleeding controlled"),
+    "stroke": ("Brief arm numbness, now resolved", "Dizziness and headache, neuro exam normal"),
+    "cardiac": ("Palpitations, now in normal rhythm", "Chest wall pain after lifting, stable ECG"),
+    "respiratory": ("Cough and mild fever for 3 days", "Mild asthma, improved with inhaler"),
+    "general": SUMMARIES["general"],
+}
+# Offloads longer than this are server downtime, not a real wait at the door.
+STALE_OFFLOAD_SECONDS = 900
+CATCH_UP_SECONDS = 120
+
 ESI_WEIGHTS = ((1, 5), (2, 25), (3, 45), (4, 20), (5, 5))
 ACUITY_BY_ESI = {1: "critical", 2: "warning"}
 
@@ -143,14 +190,26 @@ def drive_minutes(zone: str, hospital: str) -> int:
     return max(3, round(math.dist((zx, zy), (spot["x"], spot["y"])) * 0.2 + 2))
 
 
+def summary_for(esi: int, complaint: str, rng: random.Random) -> str:
+    pool = URGENT_SUMMARIES if esi <= 2 else MINOR_SUMMARIES if esi >= 4 else MID_SUMMARIES
+    return rng.choice(pool[complaint])
+
+
+def complaint_label(complaint: str, esi: int) -> str:
+    labels = LEVEL_LABELS.get(complaint)
+    if not labels:
+        return COMPLAINT_LABEL.get(complaint, complaint)
+    return labels[0 if esi <= 2 else 1 if esi == 3 else 2]
+
+
 def needs_for(esi: int, complaint: str) -> list[str]:
     urgent = esi <= 2
     return {
-        "trauma": ["Trauma bay", "CT", "OR on standby"] if urgent else ["ED bed", "X-ray"],
+        "trauma": ["Trauma bay", "CT", "OR on standby"] if urgent else ["Fast track", "X-ray"] if esi >= 4 else ["ED bed", "X-ray"],
         "stroke": ["CT now", "Stroke team"] + (["ICU likely"] if urgent else []),
         "cardiac": ["Cath lab", "Cardiology"] if urgent else ["Monitored bed", "ECG"],
         "respiratory": ["ICU bed", "Respiratory therapy"] if urgent else ["Monitored bed"],
-        "general": ["Fast track"] if esi >= 4 else ["ED bed"],
+        "general": ["Resus bay", "Labs & ECG"] if urgent else ["Fast track"] if esi >= 4 else ["ED bed"],
     }[complaint]
 
 
@@ -396,7 +455,7 @@ def suggest_bed(db: Session, esi: int, complaint: str, exclude: set[str] | None 
     if not beds:
         return None
     if esi == 1:
-        order = ("ED-T", "ER-T", "ED-", "ER-")
+        order = ("ED-T", "ER-T", "ED-", "ER-", "OBS-")
     elif esi == 2:
         order = ("ED-", "ED-T", "ER-", "OBS-")
     elif esi == 3:
@@ -407,7 +466,8 @@ def suggest_bed(db: Session, esi: int, complaint: str, exclude: set[str] | None 
         for room in beds:
             if room.id.startswith(prefix) and not (prefix == "ED-" and room.id.startswith("ED-T")):
                 return room.id
-    return beds[0].id
+    # The sickest never go to fast track: no suitable bed means make room or divert.
+    return beds[0].id if esi >= 3 else None
 
 
 def _held_beds(db: Session) -> set[str]:
@@ -442,14 +502,19 @@ def create_run(
         db.scalars(select(AmbulanceRun.patient_name).where(AmbulanceRun.status.in_(ACTIVE))).all()
     )
     minutes = eta_minutes if eta_minutes else drive_minutes(zone, destination) + rng.randint(0, 2)
+    # No two ambulances on the road share a unit name.
+    on_road = set(db.scalars(select(AmbulanceRun.unit).where(
+        or_(AmbulanceRun.status.in_(ACTIVE), and_(AmbulanceRun.status == "diverted", AmbulanceRun.handed_off_at.is_(None)))
+    )).all())
+    free_units = [f"Medic {number}" for number in range(2, 30) if f"Medic {number}" not in on_road]
     run = AmbulanceRun(
         code="RUN-NEW",
-        unit=f"Medic {rng.randint(2, 29)}",
+        unit=rng.choice(free_units) if free_units else f"Medic {rng.randint(2, 29)}",
         agency=rng.choice(AGENCIES),
         zone=zone,
         esi=esi,
         complaint=complaint,
-        summary=(summary or rng.choice(SUMMARIES[complaint]))[:200],
+        summary=(summary or summary_for(esi, complaint, rng))[:200],
         patient_name=fresh_patient_name(taken, rng.randrange(10_000)),
         age=rng.randint(19, 88),
         destination=destination,
@@ -467,7 +532,7 @@ def create_run(
         sim._log(
             db,
             run.unit,
-            f"{run.unit} pre-alert: ESI {esi} {COMPLAINT_LABEL[complaint].lower()}, ETA {max(1, minutes)} min",
+            f"{run.unit} pre-alert: ESI {esi} {complaint_label(complaint, esi).lower()}, ETA {max(1, minutes)} min",
             None,
             "ems",
         )
@@ -527,15 +592,15 @@ def divert(db: Session, run: AmbulanceRun, to: str | None, actor: str) -> Ambula
     return run
 
 
-def arrive(db: Session, run: AmbulanceRun) -> AmbulanceRun:
+def arrive(db: Session, run: AmbulanceRun, at: datetime | None = None) -> AmbulanceRun:
     run.status = "arrived"
-    run.arrived_at = _now()
+    run.arrived_at = at or _now()
     sim._log(db, run.unit, f"{run.unit} arrived at EMS bay · {run.code}", run.bed_id, "ems")
     db.commit()
     return run
 
 
-def handoff(db: Session, run: AmbulanceRun, actor: str) -> AmbulanceRun:
+def handoff(db: Session, run: AmbulanceRun, actor: str, at: datetime | None = None) -> AmbulanceRun:
     """Patient leaves the stretcher for the reserved bed: a real admission in the census."""
     if run.destination != HOME or run.status not in ("accepted", "arrived"):
         raise ValueError("Only an ambulance at this hospital can hand off.")
@@ -575,7 +640,7 @@ def handoff(db: Session, run: AmbulanceRun, actor: str) -> AmbulanceRun:
             nurse=nurse,
             age=run.age,
             chief_complaint=run.summary,
-            diagnosis=f"{COMPLAINT_LABEL[run.complaint]} · ED workup",
+            diagnosis=f"{complaint_label(run.complaint, run.esi)} · ED workup",
             stay_ticks=0,
             **reading,
         ))
@@ -584,7 +649,7 @@ def handoff(db: Session, run: AmbulanceRun, actor: str) -> AmbulanceRun:
         sim._clear_clean(bed)
         run.bed_id = bed.id
         run.status = "handed_off"
-        run.handed_off_at = _now()
+        run.handed_off_at = at or _now()
         run.decided_by = run.decided_by or actor
         sim._log(db, name, f"{name} admitted to {bed.id} from {run.unit}", bed.id, "admit")
         sim._commit(db)
@@ -606,7 +671,7 @@ def tick(db: Session, rng: random.Random | None = None, generate: bool = True) -
     now = _now()
     notes = []
     for run in db.scalars(select(AmbulanceRun).where(AmbulanceRun.status.in_(ACTIVE)).order_by(AmbulanceRun.id)).all():
-        created, eta, arrived = _aware(run.created_at), _aware(run.eta_at), _aware(run.arrived_at)
+        eta, arrived = _aware(run.eta_at), _aware(run.arrived_at)
         try:
             if run.destination != HOME:
                 if now >= eta:
@@ -614,18 +679,16 @@ def tick(db: Session, rng: random.Random | None = None, generate: bool = True) -
                     run.arrived_at = run.handed_off_at = now
                     db.commit()
                 continue
-            if run.status == "pending" and (now - created).total_seconds() >= AUTO_RESPONSE_SECONDS:
-                try:
-                    accept(db, run, None, "auto")
-                    notes.append(f"auto-accepted {run.code}")
-                except ValueError:
-                    divert(db, run, None, "auto")
-                    notes.append(f"auto-diverted {run.code}")
+            if run.status == "pending" and (eta - now).total_seconds() <= NO_ANSWER_LEAD_SECONDS:
+                divert(db, run, None, NO_ANSWER)
+                notes.append(f"{run.code}: no answer, crew went elsewhere")
             elif run.status == "accepted" and now >= eta:
-                arrive(db, run)
+                late = (now - eta).total_seconds() > CATCH_UP_SECONDS
+                arrive(db, run, at=eta if late else None)
                 notes.append(f"{run.code} arrived")
             elif run.status == "arrived" and arrived and (now - arrived).total_seconds() >= AUTO_HANDOFF_SECONDS:
-                handoff(db, run, "auto")
+                late = (now - arrived).total_seconds() > AUTO_HANDOFF_SECONDS + CATCH_UP_SECONDS
+                handoff(db, run, "auto", at=arrived + timedelta(seconds=AUTO_HANDOFF_SECONDS) if late else None)
                 notes.append(f"{run.code} handed off")
         except ValueError:
             db.rollback()
@@ -636,8 +699,31 @@ def tick(db: Session, rng: random.Random | None = None, generate: bool = True) -
             run.handed_off_at = now
     db.commit()
 
+    # A bed held for an ambulance that is no longer coming goes back to the pool.
+    # Pending runs count too: accept() reserves the bed a moment before the run turns accepted.
+    coming = {
+        f"EMS {run.unit} · {run.patient_name}"[:80]
+        for run in db.scalars(select(AmbulanceRun).where(AmbulanceRun.status.in_(ACTIVE))).all()
+    }
+    for room in db.scalars(select(Room).where(Room.status == "reserved", Room.hold_for.like("EMS %"))).all():
+        if room.hold_for not in coming:
+            sim.release_room(db, room.id)
+            notes.append(f"released stale hold on {room.id}")
+
+    if generate:
+        # Top up: never fewer than MIN_INCOMING ambulances on their way to this hospital.
+        incoming = db.scalar(
+            select(func.count()).select_from(AmbulanceRun)
+            .where(AmbulanceRun.destination == HOME, AmbulanceRun.status.in_(ACTIVE))
+        ) or 0
+        for _ in range(max(0, MIN_INCOMING - incoming)):
+            zone = rng.choice(list(ZONES))
+            complaint = rng.choice(COMPLAINTS)
+            create_run(db, esi=_weighted_esi(rng), complaint=complaint, zone=zone, simulated=True, rng=rng)
+            notes.append("new run to keep the queue at three")
+
     if generate and not _next_generation["at"]:
-        _next_generation["at"] = time.time() + 20  # first ambulance shortly after startup
+        _next_generation["at"] = time.time() + 20  # first regional ambulance shortly after startup
     elif generate and time.time() >= _next_generation["at"]:
         zone = rng.choice(list(ZONES))
         complaint = rng.choice(COMPLAINTS)
@@ -654,6 +740,13 @@ def tick(db: Session, rng: random.Random | None = None, generate: bool = True) -
 
 # ---------- Read models ----------
 
+def _offload(arrived: datetime | None, handed: datetime | None) -> int | None:
+    if not arrived or not handed:
+        return None
+    seconds = round((handed - arrived).total_seconds())
+    return seconds if 0 <= seconds <= STALE_OFFLOAD_SECONDS else None
+
+
 def run_payload(run: AmbulanceRun, now: datetime | None = None) -> dict:
     now = now or _now()
     eta = _aware(run.eta_at)
@@ -667,7 +760,7 @@ def run_payload(run: AmbulanceRun, now: datetime | None = None) -> dict:
         "zone": run.zone,
         "esi": run.esi,
         "complaint": run.complaint,
-        "complaint_label": COMPLAINT_LABEL.get(run.complaint, run.complaint),
+        "complaint_label": complaint_label(run.complaint, run.esi),
         "summary": run.summary,
         "patient_name": run.patient_name,
         "age": run.age,
@@ -692,7 +785,7 @@ def run_payload(run: AmbulanceRun, now: datetime | None = None) -> dict:
         "responded_at": _aware(run.responded_at).isoformat() if run.responded_at else None,
         "arrived_at": arrived.isoformat() if arrived else None,
         "handed_off_at": handed.isoformat() if handed else None,
-        "offload_seconds": round((handed - arrived).total_seconds()) if handed and arrived else None,
+        "offload_seconds": _offload(arrived, handed),
         "route": {
             "from": dict(zip(("x", "y"), ZONES.get(run.zone, ZONES["Downtown"]))),
             "to": {"x": HOSPITALS[target]["x"], "y": HOSPITALS[target]["y"]},
@@ -708,9 +801,10 @@ def summary(db: Session) -> dict:
     ).all()
     en_route = [run for run in home_runs if run.status in ("pending", "accepted")]
     offloads = [
-        (_aware(run.handed_off_at) - _aware(run.arrived_at)).total_seconds()
+        seconds
         for run in home_runs
-        if run.status == "handed_off" and run.handed_off_at and run.arrived_at
+        if run.status == "handed_off"
+        and (seconds := _offload(_aware(run.arrived_at), _aware(run.handed_off_at))) is not None
     ]
     return {
         "en_route": len(en_route),

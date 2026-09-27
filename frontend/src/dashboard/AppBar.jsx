@@ -4,7 +4,6 @@ export const TABS = [
   { id: "overview", label: "Overview", icon: "gauge" },
   { id: "live", label: "Live Map", icon: "map" },
   { id: "ambulances", label: "Ambulances", icon: "ambulance" },
-  { id: "network", label: "Network", icon: "network" },
   { id: "data", label: "Open Data", icon: "layers" },
 ];
 
@@ -36,16 +35,6 @@ function TabIcon({ name }) {
         <circle cx="4.2" cy="14.6" r="1.5" />
         <circle cx="14.4" cy="14.6" r="1.5" />
         <path d="M6.5 8.2v3.4M4.8 9.9h3.4" />
-      </svg>
-    );
-  }
-  if (name === "network") {
-    return (
-      <svg {...common}>
-        <circle cx="10" cy="4.2" r="2" />
-        <circle cx="4" cy="15.4" r="2" />
-        <circle cx="16" cy="15.4" r="2" />
-        <path d="M9 5.9 5 13.7M11 5.9l4 7.8M6 15.4h8" />
       </svg>
     );
   }

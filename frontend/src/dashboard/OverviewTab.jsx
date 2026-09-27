@@ -1,5 +1,19 @@
 import { ESI, UNIT_ORDER, blockingUnit, countdown, tightestUnit } from "./network/ems";
-import { Card, Kpi, PageHead } from "./ui";
+import { AnimatedNumber, Card, EtaTrack, HeroStat, PageHero } from "./ui";
+
+// A real photo of each kind of room, from /public/rooms.
+const UNIT_PHOTOS = {
+  ed: "/rooms/ed-exam.png",
+  icu: "/rooms/icu.png",
+  inpatient: "/rooms/medsurg.png",
+  or: "/rooms/or.png",
+};
+
+const LEVEL_TEXT = { open: "Room to spare", limited: "Getting tight", full: "Full", none: "Not offered" };
+// Pending first, so the ones that need an answer are always on the home screen.
+const ARRIVALS_SHOWN = 4;
+// Hero tiles are narrow: one word per unit.
+const SHORT_UNIT = { "Intensive care": "ICU", "Inpatient beds": "Inpatient", "Operating rooms": "Surgery" };
 
 function greeting(now) {
   const hour = now.getHours();
@@ -35,25 +49,74 @@ function arrivalRank(run) {
   return 2;
 }
 
-function netLabel(totals) {
+// Admissions, discharges and transfers over the last 2 hours, under the briefing.
+function FlowStrip({ totals }) {
   if (!totals) return null;
   const net = totals.admit - totals.discharge - totals.transfer;
-  if (net > 0) return `+${net} net · filling over 2 h`;
-  if (net < 0) return `${net} net · emptying over 2 h`;
-  return "balanced over 2 h";
+  const cells = [
+    ["Admitted", totals.admit],
+    ["Discharged", totals.discharge],
+    ["Transferred out", totals.transfer],
+    ["Net census", net, (value) => (value > 0 ? `+${value}` : String(value))],
+  ];
+  return (
+    <div className="brief-flow">
+      <p>Patient flow · last 2 hours</p>
+      <dl>
+        {cells.map(([label, value, format]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd><AnimatedNumber value={value} format={format} /></dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
 
-export default function OverviewTab({
-  now,
-  insights,
-  briefing,
-  onRefreshBriefing,
-  capacity,
-  incoming = [],
-  emsStatus,
-  onOpenAmbulances,
-  onOpenRun,
-}) {
+// Occupancy ring: one arc, the unit's level colour, value in the middle.
+function Gauge({ pct }) {
+  const safe = Math.max(0, Math.min(100, pct || 0));
+  return (
+    <div className="gauge" role="img" aria-label={`${safe}% occupied`}>
+      <svg viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="15.5" className="gauge-track" />
+        <circle
+          cx="18"
+          cy="18"
+          r="15.5"
+          className="gauge-arc"
+          pathLength="100"
+          strokeDasharray={`${safe} 100`}
+          transform="rotate(-90 18 18)"
+        />
+      </svg>
+      <b><AnimatedNumber value={safe} /><small>%</small></b>
+    </div>
+  );
+}
+
+function UnitCard({ id, unit, waitMin }) {
+  return (
+    <article className={`unit-card is-${unit.level}`}>
+      <div className="unit-photo">
+        <img src={UNIT_PHOTOS[id]} alt="" loading="lazy" />
+        <span className="unit-level"><i />{LEVEL_TEXT[unit.level] || unit.level}</span>
+      </div>
+      <div className="unit-body">
+        <Gauge pct={unit.occupancy_pct} />
+        <div className="unit-text">
+          <strong>{unit.label}</strong>
+          <span><b>{unit.open}</b> open of {unit.total}</span>
+          {id === "ed" && waitMin != null && <small>~{waitMin} min wait for a walk-in</small>}
+          {id !== "ed" && <small>{unit.total - unit.open} in use</small>}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export default function OverviewTab({ now, insights, briefing, onRefreshBriefing, capacity, incoming = [], onOpenAmbulances, onOpenRun }) {
   const totals = insights?.totals;
   const units = capacity?.units;
   const tight = tightestUnit(units);
@@ -62,30 +125,26 @@ export default function OverviewTab({
   const soon = dueSoon(incoming).sort(
     (a, b) => arrivalRank(a) - arrivalRank(b) || (a.eta_seconds ?? 0) - (b.eta_seconds ?? 0),
   );
-  const diverting = emsStatus?.ems_status === "diverting";
-  const flow = netLabel(totals);
   const dateLabel = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const edOpen = units?.ed?.open;
 
   return (
-    <div className="page">
-      <PageHead
+    <div className="page has-hero ov2">
+      <PageHero
+        image="/main-hospital.jpg"
+        position="center 38%"
         kicker={dateLabel}
         title={`${greeting(now)}. Can we take the next ambulance?`}
-        sub="Live capacity in every unit, who is due in 15 minutes, and the one decision that keeps the doors honest."
+        sub="Live capacity in every unit of Tiger Memorial, the ambulances heading to our door, and what needs an answer now."
       >
-        <div className={diverting ? "ov-head-status is-diverting" : "ov-head-status"}>
-          <i />
-          <strong>{diverting ? "On diversion" : "Accepting ambulances"}</strong>
-          <small>
-            {diverting
-              ? emsStatus?.reason || "At capacity"
-              : "What every ambulance company sees"}
-          </small>
+        <div className="hero-stats">
+          <HeroStat value={pending.length} label="Pre-alerts to answer" tone={pending.length ? "alert" : undefined} />
+          <HeroStat value={soon.length} label="Arriving in 15 min" />
+          <HeroStat value={units?.ed?.open ?? "—"} label="Emergency beds open" />
+          <HeroStat value={tight ? SHORT_UNIT[tight.label] || tight.label : "—"} label={tight ? `Tightest · ${tight.open} open` : "Tightest unit"} tone={tight && tight.level !== "open" ? "warn" : "text"} />
         </div>
-      </PageHead>
+      </PageHero>
 
-      <div className="ov-hero">
+      <div className="ov2-top">
         <section className="brief">
           <div className="brief-glow" aria-hidden="true" />
           <header>
@@ -98,8 +157,8 @@ export default function OverviewTab({
                 {briefing.loading
                   ? "Reading the census…"
                   : briefing.source === "ai"
-                    ? "Written by Gemini from live data"
-                    : "Computed from live data"}
+                    ? "Written by AI from the live database"
+                    : "Computed from the live database"}
               </small>
             </div>
             <button type="button" onClick={onRefreshBriefing} disabled={briefing.loading} aria-label="Refresh briefing">
@@ -109,108 +168,62 @@ export default function OverviewTab({
             </button>
           </header>
           <BriefingLines text={briefing.text} />
+          <FlowStrip totals={totals} />
         </section>
 
-        <section className="capacity">
-          <p className="card-kicker">Unit capacity</p>
-          {units ? (
-            <ul className="unit-cap">
-              {UNIT_ORDER.map((key) => {
-                const unit = units[key];
-                if (!unit) return null;
-                return (
-                  <li key={key} className={`is-${unit.level}`}>
-                    <span>{unit.label}</span>
-                    <div className="hunit-bar"><i style={{ width: `${unit.occupancy_pct}%` }} /></div>
-                    <b>{unit.occupancy_pct}%</b>
-                    <small>
-                      {unit.open} open
-                      {key === "ed" && capacity.ed_wait_min != null ? ` · ~${capacity.ed_wait_min} min wait` : ""}
-                    </small>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="empty-note">Reading live capacity…</p>
-          )}
-          {flow && (
-            <p className="cap-foot">
-              <span>{flow}</span>
-            </p>
-          )}
-        </section>
-      </div>
-
-      <div className="kpi-row">
-        <Kpi
-          label="Unanswered pre-alerts"
-          icon="alert"
-          value={pending.length}
-          note={pending.length ? "waiting for an answer" : "every pre-alert answered"}
-          tone={pending.length ? "warn" : undefined}
-        />
-        <Kpi
-          label="Due in 15 min"
+        <Card
+          kicker="Next 15 minutes"
+          title={soon.length === 1 ? "1 ambulance arriving" : soon.length ? `${soon.length} ambulances arriving` : "No ambulance due"}
           icon="transfer"
-          value={soon.length}
-          note={soon.some((run) => run.status === "arrived") ? "includes the EMS bay" : "on the way to this door"}
-        />
-        <Kpi
-          label="ED beds open"
-          icon="bed"
-          loading={!units}
-          value={edOpen ?? "—"}
-          note="held beds are not counted"
-        />
-        <Kpi
-          label="Tightest unit"
-          icon="bars"
-          loading={!tight}
-          value={tight ? tight.label : "—"}
-          note={tight ? `${tight.open} open · ${tight.occupancy_pct}%` : ""}
-          tone={tight && (tight.level === "full" || tight.level === "limited") ? "warn" : undefined}
-        />
+          className="ov2-arrivals"
+          action={<button type="button" className="link-btn" onClick={onOpenAmbulances}>All ambulances →</button>}
+        >
+          <ul className="arrivals2">
+            {soon.slice(0, ARRIVALS_SHOWN).map((run) => (
+              <li
+                key={run.id}
+                className={run.status === "pending" ? "is-pending" : run.status === "arrived" ? "is-here" : ""}
+                style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}
+              >
+                <span className="arr2-esi">ESI {run.esi}</span>
+                <span className="arr2-main">
+                  <strong>{run.complaint_label}</strong>
+                  <small>{run.unit} · {run.bed_id ? `bed ${run.bed_id}` : "no bed yet"}</small>
+                </span>
+                <b className="arr2-when">{run.status === "arrived" ? "At bay" : countdown(run.eta_seconds)}</b>
+                {run.status === "pending" && (
+                  <button type="button" className="arr2-answer" onClick={() => onOpenRun(run)}>Answer</button>
+                )}
+                <EtaTrack run={run} />
+              </li>
+            ))}
+            {!soon.length && <li className="empty-note">Pre-alerts from ambulance crews appear here the moment they are sent.</li>}
+          </ul>
+          {soon.length > ARRIVALS_SHOWN && (
+            <button type="button" className="arr2-more" onClick={onOpenAmbulances}>
+              +{soon.length - ARRIVALS_SHOWN} more in Ambulances →
+            </button>
+          )}
+        </Card>
       </div>
 
-      <Card
-        kicker="Next 15 minutes"
-        title={soon.length === 1 ? "1 ambulance arriving" : soon.length ? `${soon.length} ambulances arriving` : "No ambulance due"}
-        icon="transfer"
-        action={<button type="button" className="link-btn" onClick={onOpenAmbulances}>Ambulances →</button>}
-      >
-        <ul className="arrivals">
-          {soon.map((run) => (
-            <li
-              key={run.id}
-              className={run.status === "pending" ? "is-pending" : ""}
-              style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}
-            >
-              <span className="esi-badge">ESI {run.esi}</span>
-              <span className="arr-main">
-                <strong>{run.complaint_label}</strong>
-                <small>{run.unit}</small>
-              </span>
-              <span className="arr-needs">{(run.needs || []).join(" · ") || "ED bed"}</span>
-              <em className="arr-bed">{run.bed_id ? run.bed_id : "no bed"}</em>
-              <b className="arr-when">{run.status === "arrived" ? "at bay" : countdown(run.eta_seconds)}</b>
-              {run.status === "pending" ? (
-                <button type="button" className="dark-btn" onClick={() => onOpenRun(run)}>Answer</button>
-              ) : (
-                <span className="arr-gap" />
-              )}
-            </li>
-          ))}
-          {!soon.length && <li className="empty-note">Pre-alerts from ambulance crews appear here as soon as they are sent.</li>}
-        </ul>
-      </Card>
-
-      {!diverting && blocker && (
-        <p className="ov-block">
-          {blocker.label} is {blocker.level === "full" ? "full" : "limited"} · {blocker.open} open.
-          Ambulance companies still see Tiger Memorial as accepting. Diversion is in the bar above.
-        </p>
-      )}
+      <section className="unit-gallery" aria-label="Capacity by unit">
+        <header>
+          <p className="card-kicker">Every unit, not only the emergency room</p>
+          <h2>Where the next patient can go</h2>
+        </header>
+        <div className="unit-grid2">
+          {units
+            ? UNIT_ORDER.map((key) => (units[key] ? <UnitCard key={key} id={key} unit={units[key]} waitMin={capacity.ed_wait_min} /> : null))
+            : UNIT_ORDER.map((key) => <div key={key} className="unit-card is-loading"><span className="skeleton is-chart" /></div>)}
+        </div>
+        {blocker && (
+          <p className="ov-block">
+            {blocker.label} is {blocker.level === "full" ? "full" : "almost full"} · {blocker.open} open.
+            An ambulance that needs it can be diverted from the Ambulances tab.
+          </p>
+        )}
+      </section>
     </div>
   );
 }
