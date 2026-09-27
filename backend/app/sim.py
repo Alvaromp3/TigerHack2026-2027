@@ -44,6 +44,11 @@ LINEN_STAGE_TICKS = {"pickup": 1, "wash": 2, "deliver": 1}
 LINEN_NEXT = {"pickup": "wash", "wash": "deliver"}
 LINEN_ACTIVE = ("pickup", "wash", "deliver")
 ISOLATION_MARKERS = ("sepsis", "c. diff", "c.diff", "covid", "mrsa", "tb", "tubercul", "isolation")
+# Beds an ambulance pre-alert can still reserve. Walk-in admits stop at this floor.
+ED_BED_FLOOR = 4
+# One ICU bed stays open so the unit can be tight without sitting at zero.
+ICU_BED_FLOOR = 1
+AMBULANCE_ZONES = (("F1", "ED"), ("F1", "FAST"), ("F3", "ER"))
 
 
 def tick(db: Session):
@@ -59,10 +64,11 @@ def tick(db: Session):
         cleaned = _advance_cleaning(db)
         delivered = _advance_linen(db)
         _advance_stay(db)
+        relief = _hold_capacity(db)
         action = _roll(db)
         _assign_housekeepers(db)
         _assign_linen(db)
-        summary = " · ".join(part for part in (cleaned, delivered, action) if part)
+        summary = " · ".join(part for part in (cleaned, delivered, relief, action) if part)
         if summary:
             log.info("census tick: %s", summary)
         _commit(db)
@@ -327,11 +333,77 @@ def _weighted_order(options):
     return order
 
 
+def _zone_code(room_id: str) -> str:
+    return room_id.split("-", 1)[0]
+
+
+def _ambulance_rooms(db: Session) -> list[Room]:
+    zones = set(AMBULANCE_ZONES)
+    return [
+        room for room in db.scalars(select(Room).where(Room.kind == "bed")).all()
+        if (room.floor_id, _zone_code(room.id)) in zones
+    ]
+
+
+def _ed_available(db: Session) -> int:
+    return sum(1 for room in _ambulance_rooms(db) if room.status == "available")
+
+
+def _ed_opening(db: Session) -> int:
+    """Beds an ambulance can reserve now, plus beds already in turnover."""
+    return sum(1 for room in _ambulance_rooms(db) if room.status in ("available", "cleaning"))
+
+
+def _icu_opening(db: Session) -> int:
+    rooms = db.scalars(select(Room).where(Room.floor_id == "F3", Room.dept == "icu", Room.kind == "bed")).all()
+    return sum(1 for room in rooms if room.status in ("available", "cleaning"))
+
+
+def _hold_capacity(db: Session) -> str | None:
+    """One correction per tick when the live census is below the ambulance floor."""
+    notes = [note for note in (_open_emergency_bed(db), _open_icu_bed(db)) if note]
+    return " · ".join(notes) or None
+
+
+def _open_emergency_bed(db: Session) -> str | None:
+    if _ed_opening(db) >= ED_BED_FLOOR:
+        return None
+    people = []
+    for floor_id, prefix in AMBULANCE_ZONES:
+        people.extend(
+            person for person in _people(db, floor_id=floor_id, prefix=prefix)
+            if person.acuity != "critical"
+        )
+    if not people:
+        return None
+    people.sort(key=lambda person: -(person.stay_ticks or 0))
+    return _discharge_patient(db, people[0])
+
+
+def _open_icu_bed(db: Session) -> str | None:
+    if _icu_opening(db) >= ICU_BED_FLOOR:
+        return None
+    beds = _med_beds(db)
+    people = _people(db, floor_id="F3", dept="icu")
+    if not beds or not people:
+        return None
+    person = max(people, key=lambda row: row.stay_ticks or 0)
+    return _move(
+        db,
+        person,
+        beds[0],
+        f"{person.name} moved to medicine {beds[0].id}",
+        settle="normal",
+    )
+
+
 def _admit_sites(db: Session):
+    hold = _ed_available(db) <= ED_BED_FLOOR
     return [
         (floor_id, prefix)
         for floor_id, prefix in ADMIT_SITES
         if _beds(db, floor_id=floor_id, prefix=prefix)
+        and not (hold and prefix in ("ED", "FAST", "ER"))
     ]
 
 
@@ -365,7 +437,7 @@ def _boarding_stable(db: Session):
 
 def _transfer_moves(db: Session):
     moves = []
-    if _beds(db, floor_id="F3", dept="icu"):
+    if len(_beds(db, floor_id="F3", dept="icu")) > ICU_BED_FLOOR:
         moves.extend(("icu", person) for person in _boarding_critical(db))
     if _med_beds(db):
         moves.extend(("floor", person) for person in _boarding_stable(db))
@@ -519,8 +591,11 @@ def fill_missing_vitals(db: Session):
 
 
 def _ed_beds(db: Session):
+    hold = _ed_available(db) <= ED_BED_FLOOR
     beds = []
     for floor_id, prefix in ADMIT_SITES:
+        if hold and prefix in ("ED", "FAST", "ER"):
+            continue
         beds.extend(_beds(db, floor_id=floor_id, prefix=prefix))
     return beds
 

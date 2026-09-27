@@ -45,7 +45,6 @@ function netLabel(totals) {
 
 export default function OverviewTab({
   now,
-  outlook,
   insights,
   briefing,
   onRefreshBriefing,
@@ -135,10 +134,11 @@ export default function OverviewTab({
           ) : (
             <p className="empty-note">Reading live capacity…</p>
           )}
-          <p className="cap-foot">
-            <span>Open beds {outlook.now} → {outlook.soon} · next {outlook.horizon} min</span>
-            {flow && <span>{flow}</span>}
-          </p>
+          {flow && (
+            <p className="cap-foot">
+              <span>{flow}</span>
+            </p>
+          )}
         </section>
       </div>
 

@@ -1473,7 +1473,6 @@ export default function CommandCenter() {
           {nav === "overview" && (
             <OverviewTab
               now={now}
-              outlook={outlook}
               insights={insights}
               briefing={{ ...briefing, text: briefingText }}
               onRefreshBriefing={refreshBriefing}
