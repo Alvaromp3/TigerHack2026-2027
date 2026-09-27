@@ -45,7 +45,7 @@ function splitMessage(item) {
   return { name, rest: message.trim() };
 }
 
-export default function PatientFlow({ movements, linked, syncedAt, onOpenMovement }) {
+export default function PatientFlow({ movements, pending = [], linked, syncedAt, onOpenMovement }) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState(null);
@@ -185,6 +185,31 @@ export default function PatientFlow({ movements, linked, syncedAt, onOpenMovemen
             : `Historial · ${rows.length} resultado${rows.length === 1 ? "" : "s"}`
           : `En vivo · últimas líneas`}
       </p>
+
+      {pending.length > 0 && !needle && (
+        <div className="pf-pending" aria-label="Waiting movements">
+          <p>Waiting</p>
+          <ol>
+            {pending.map((item) => (
+              <li key={item.id}>
+                {item.room_id ? (
+                  <button type="button" onClick={() => onOpenMovement({ room_id: item.room_id })}>
+                    <strong>{item.room_id}</strong>
+                    <span>{item.title}</span>
+                    <em>{item.reason}</em>
+                  </button>
+                ) : (
+                  <div>
+                    <strong>Hold</strong>
+                    <span>{item.title}</span>
+                    <em>{item.reason}</em>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       <div className="pf-log">
         {searchError ? (

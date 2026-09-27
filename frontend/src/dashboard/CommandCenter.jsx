@@ -3,9 +3,12 @@ import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import Capacity from "./Capacity";
-import Overview from "./Overview";
+import ChatPanel from "./ChatPanel";
+import Command from "./Command";
+import IncidentsBoard from "./IncidentsBoard";
 import PatientFlow from "./PatientFlow";
 import Reports from "./Reports";
+import StaffBoard from "./StaffBoard";
 import {
   BUILDING,
   FRAME,
@@ -20,12 +23,13 @@ import {
 import { apiUrl } from "../api/client";
 import { roomVisualSrc } from "./roomVisuals";
 import { flowBucket } from "./flowBuckets";
+import { buildLiveOps, incidentsFromCensus } from "./liveOps";
 import "./dashboard.css";
 import logo from "./logo.png";
 
 const NAV = [
   { id: "live", label: "Live Map", icon: "map" },
-  { id: "overview", label: "Overview", icon: "grid" },
+  { id: "command", label: "Command", icon: "grid" },
   { id: "capacity", label: "Capacity", icon: "bed" },
   { id: "flow", label: "Patient Flow", icon: "flow" },
   { id: "staff", label: "Staff", icon: "users" },
@@ -62,81 +66,206 @@ const SFX_BY_ROOM_ID = {
   ADMIN: "Trump.mp3",
 };
 
-const ROOM_VOICES = [
-  "voice-01-three-hours.mp3",
-  "voice-02-waiting-room.mp3",
-  "voice-03-psychological.mp3",
-  "voice-04-same-pill.mp3",
-  "voice-05-phone.mp3",
-  "voice-06-leaving.mp3",
-  "voice-07-smile.mp3",
-  "voice-08-beeping.mp3",
-  "voice-09-quick.mp3",
-  "voice-10-observe.mp3",
-  "voice-11-big-toe.mp3",
-  "voice-12-vacation.mp3",
-  "voice-13-five-minutes.mp3",
-  "voice-14-gown.mp3",
-  "voice-15-bill.mp3",
-  "voice-16-ulcer.mp3",
-  "voice-17-knee.mp3",
-  "voice-18-xray.mp3",
-  "voice-19-number.mp3",
-  "voice-20-paperwork.mp3",
-  "voice-21-meeting.mp3",
-  "voice-22-pills.mp3",
-  "voice-23-extra.mp3",
-  "voice-24-still.mp3",
-  "voice-25-loyalty.mp3",
-  "voice-26-bandage.mp3",
-  "voice-27-ice.mp3",
-  "voice-28-deluxe.mp3",
-  "voice-29-coffee.mp3",
-  "voice-30-clipboard.mp3",
-  "voice-31-sneeze.mp3",
-  "voice-32-intern.mp3",
-  "voice-33-thank-you.mp3",
-  "voice-34-my-name.mp3",
-  "voice-35-pain-gone.mp3",
-  "voice-36-warm-blanket.mp3",
-  "voice-37-not-scared.mp3",
-  "voice-38-kind-team.mp3",
-  "voice-39-breathe.mp3",
-  "voice-40-listened.mp3",
-  "voice-41-discharge.mp3",
-  "voice-42-five-stars.mp3",
-  "voice-43-family.mp3",
-  "voice-44-how-i-slept.mp3",
-  "voice-45-pain-two.mp3",
-  "voice-46-gentle-floor.mp3",
-  "voice-47-safe.mp3",
-  "voice-48-found-it.mp3",
-];
+const VOICE = {
+  wait: [
+    "voice-01-three-hours.mp3",
+    "voice-02-waiting-room.mp3",
+    "voice-13-five-minutes.mp3",
+    "voice-19-number.mp3",
+    "voice-24-still.mp3",
+  ],
+  family: [
+    "voice-43-family.mp3",
+    "voice-01-three-hours.mp3",
+    "voice-02-waiting-room.mp3",
+    "voice-13-five-minutes.mp3",
+  ],
+  clinic: [
+    "voice-03-psychological.mp3",
+    "voice-07-smile.mp3",
+    "voice-11-big-toe.mp3",
+    "voice-16-ulcer.mp3",
+    "voice-17-knee.mp3",
+    "voice-31-sneeze.mp3",
+    "voice-34-my-name.mp3",
+    "voice-40-listened.mp3",
+    "voice-33-thank-you.mp3",
+    "voice-42-five-stars.mp3",
+  ],
+  pharmacy: [
+    "voice-04-same-pill.mp3",
+    "voice-22-pills.mp3",
+    "voice-23-extra.mp3",
+  ],
+  icu: [
+    "voice-08-beeping.mp3",
+    "voice-37-not-scared.mp3",
+    "voice-39-breathe.mp3",
+    "voice-47-safe.mp3",
+    "voice-38-kind-team.mp3",
+    "voice-36-warm-blanket.mp3",
+  ],
+  or: [
+    "voice-14-gown.mp3",
+    "voice-37-not-scared.mp3",
+    "voice-39-breathe.mp3",
+  ],
+  ward: [
+    "voice-28-deluxe.mp3",
+    "voice-36-warm-blanket.mp3",
+    "voice-44-how-i-slept.mp3",
+    "voice-45-pain-two.mp3",
+    "voice-46-gentle-floor.mp3",
+    "voice-41-discharge.mp3",
+    "voice-35-pain-gone.mp3",
+    "voice-33-thank-you.mp3",
+  ],
+  surgWard: [
+    "voice-14-gown.mp3",
+    "voice-26-bandage.mp3",
+    "voice-35-pain-gone.mp3",
+    "voice-36-warm-blanket.mp3",
+    "voice-44-how-i-slept.mp3",
+    "voice-45-pain-two.mp3",
+    "voice-46-gentle-floor.mp3",
+    "voice-41-discharge.mp3",
+  ],
+  pacu: [
+    "voice-35-pain-gone.mp3",
+    "voice-36-warm-blanket.mp3",
+    "voice-39-breathe.mp3",
+    "voice-14-gown.mp3",
+    "voice-41-discharge.mp3",
+  ],
+  imaging: [
+    "voice-18-xray.mp3",
+    "voice-48-found-it.mp3",
+  ],
+  ed: [
+    "voice-09-quick.mp3",
+    "voice-26-bandage.mp3",
+    "voice-27-ice.mp3",
+    "voice-06-leaving.mp3",
+    "voice-31-sneeze.mp3",
+    "voice-45-pain-two.mp3",
+  ],
+  trauma: [
+    "voice-08-beeping.mp3",
+    "voice-09-quick.mp3",
+    "voice-26-bandage.mp3",
+    "voice-27-ice.mp3",
+    "voice-37-not-scared.mp3",
+    "voice-47-safe.mp3",
+  ],
+  observe: [
+    "voice-10-observe.mp3",
+    "voice-09-quick.mp3",
+    "voice-45-pain-two.mp3",
+  ],
+  nurse: [
+    "voice-05-phone.mp3",
+    "voice-30-clipboard.mp3",
+    "voice-32-intern.mp3",
+    "voice-38-kind-team.mp3",
+    "voice-29-coffee.mp3",
+  ],
+  lounge: [
+    "voice-12-vacation.mp3",
+    "voice-29-coffee.mp3",
+    "voice-32-intern.mp3",
+  ],
+  pt: [
+    "voice-17-knee.mp3",
+    "voice-27-ice.mp3",
+    "voice-35-pain-gone.mp3",
+  ],
+  conference: [
+    "voice-21-meeting.mp3",
+    "voice-20-paperwork.mp3",
+    "voice-25-loyalty.mp3",
+  ],
+  admin: [
+    "voice-15-bill.mp3",
+    "voice-20-paperwork.mp3",
+    "voice-25-loyalty.mp3",
+    "voice-42-five-stars.mp3",
+  ],
+  triage: [
+    "voice-09-quick.mp3",
+    "voice-19-number.mp3",
+    "voice-01-three-hours.mp3",
+    "voice-31-sneeze.mp3",
+  ],
+};
 
-const VOICE_DEPTS = new Set([
-  "icu",
-  "surgery",
-  "imaging",
-  "ed",
-  "trauma",
-  "med",
-  "surgward",
-  "pacu",
-  "pharmacy",
-  "waiting",
-  "outpatient",
-  "clinic",
-  "nurse",
-  "conference",
-]);
+const VOICES_BY_TYPE = {
+  "Waiting room": VOICE.wait,
+  "Clinic waiting": VOICE.wait,
+  "Family waiting": VOICE.family,
+  "Exam room": VOICE.clinic,
+  Pharmacy: VOICE.pharmacy,
+  "Floor pharmacy": VOICE.pharmacy,
+  "Medication room": VOICE.pharmacy,
+  "ICU — Single": VOICE.icu,
+  "Operating room": VOICE.or,
+  Scrub: VOICE.or,
+  "Post-anesthesia recovery": VOICE.pacu,
+  "X-ray": VOICE.imaging,
+  "CT suite": VOICE.imaging,
+  "MRI suite": VOICE.imaging,
+  Control: VOICE.imaging,
+  "ED — Exam": VOICE.ed,
+  "Fast track": VOICE.ed,
+  "ED — Trauma": VOICE.trauma,
+  Observation: VOICE.observe,
+  Triage: VOICE.triage,
+  "Nurse station": VOICE.nurse,
+  "Staff station": VOICE.nurse,
+  "Staff lounge": VOICE.lounge,
+  "Support room": VOICE.lounge,
+  "PT gym": VOICE.pt,
+  Conference: VOICE.conference,
+  "Board room": VOICE.conference,
+  "Medical director": VOICE.admin,
+};
 
-function voiceForRoom(room) {
-  if (!VOICE_DEPTS.has(room.dept)) return null;
+const AMBIENT_BY_TYPE = {
+  Restroom: null,
+  Equipment: "Storage.mp3",
+  "Clean utility": "Storage.mp3",
+  "Soiled utility": "Storage.mp3",
+  Linen: "Storage.mp3",
+  "Sterile core": "Surgery.mp3",
+  Decontamination: "Surgery.mp3",
+  "Prep and pack": "Surgery.mp3",
+  "Sterile storage": "Surgery.mp3",
+  "Ambulance bay": "Emergency&Trauma.mp3",
+  "Resuscitation support": "Emergency&Trauma.mp3",
+  "Stat lab": "Clinic.mp3",
+};
+
+function pickClip(room, list) {
+  if (!list?.length) return null;
   let hash = 0;
   for (let i = 0; i < room.id.length; i += 1) {
     hash = (Math.imul(hash, 31) + room.id.charCodeAt(i)) >>> 0;
   }
-  return ROOM_VOICES[hash % ROOM_VOICES.length];
+  return list[hash % list.length];
+}
+
+function voiceForRoom(room) {
+  if (room.type === "Med/Surg — Single") {
+    return pickClip(room, room.dept === "surgward" ? VOICE.surgWard : VOICE.ward);
+  }
+  return pickClip(room, VOICES_BY_TYPE[room.type]);
+}
+
+function sfxForRoom(room) {
+  if (SFX_BY_ROOM_ID[room.id]) return SFX_BY_ROOM_ID[room.id];
+  const voice = voiceForRoom(room);
+  if (voice) return voice;
+  if (Object.prototype.hasOwnProperty.call(AMBIENT_BY_TYPE, room.type)) return AMBIENT_BY_TYPE[room.type];
+  return SFX_BY_DEPARTMENT[room.dept] || null;
 }
 
 const NOTES = {
@@ -147,72 +276,6 @@ const NOTES = {
   reports: "Counts come from the live census and the last 200 flow events.",
   three: "3D is off. This command view is the measured 2D plate.",
 };
-
-const DEFAULT_INCIDENTS = [
-  {
-    id: "INC-241",
-    roomId: "ED-T1",
-    title: "Patient fall on arrival — bay held for assessment",
-    severity: "high",
-    status: "open",
-    createdAt: "2026-09-26T08:00:00Z",
-    photo: "/faces/face-10-scared.png",
-  },
-  {
-    id: "INC-236",
-    roomId: "ICU-305",
-    title: "Combative patient — restraints and security requested",
-    severity: "critical",
-    status: "open",
-    createdAt: "2026-09-26T07:41:00Z",
-    photo: "/faces/face-01-mad.png",
-  },
-  {
-    id: "INC-228",
-    roomId: "OBS-2",
-    title: "Patient reports chest pain — spill blocking the doorway",
-    severity: "medium",
-    status: "open",
-    createdAt: "2026-09-26T07:12:00Z",
-    photo: "/faces/face-06-sad.png",
-  },
-  {
-    id: "INC-189",
-    roomId: "ICU-301",
-    title: "ICU bed held for engineering inspection",
-    severity: "medium",
-    status: "resolved",
-    createdAt: "2026-09-25T15:22:00Z",
-    photo: "/faces/face-03-happy.png",
-  },
-];
-
-function applyIncidentState(hospital, incidents) {
-  const openIncidents = new Map(
-    incidents
-      .filter((incident) => incident.status === "open")
-      .map((incident) => [incident.roomId, incident]),
-  );
-
-  return hospital.map((floor) => ({
-    ...floor,
-    rooms: floor.rooms.map((room) => {
-      const incident = openIncidents.get(room.id);
-      if (!incident) {
-        return room.status === "blocked" ? { ...room, status: room._incidentBaseline || "available", _incidentBaseline: null, incidentId: null, incidentTitle: null } : room;
-      }
-
-      const baseline = room._incidentBaseline || room.status;
-      return {
-        ...room,
-        status: "blocked",
-        _incidentBaseline: baseline,
-        incidentId: incident.id,
-        incidentTitle: incident.title,
-      };
-    }),
-  }));
-}
 
 function Icon({ name }) {
   const common = {
@@ -306,6 +369,13 @@ function Icon({ name }) {
       <svg {...common}>
         <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4l2-2z" />
         <path d="M10 19a2 2 0 0 0 4 0" />
+      </svg>
+    );
+  }
+  if (name === "chat") {
+    return (
+      <svg {...common}>
+        <path d="M5 6.5h14v9H8l-3 2.5V6.5z" />
       </svg>
     );
   }
@@ -463,8 +533,10 @@ function Stat({ tone, label, value }) {
 }
 
 export default function CommandCenter() {
-  const [hospital, setHospital] = useState(() => applyIncidentState(buildHospital(), DEFAULT_INCIDENTS));
-  const [incidents, setIncidents] = useState(DEFAULT_INCIDENTS);
+  const [hospital, setHospital] = useState(() => buildHospital());
+  const [incidents, setIncidents] = useState([]);
+  const [ops, setOps] = useState(null);
+  const [actionNote, setActionNote] = useState("");
   const [floorId, setFloorId] = useState("F1");
   const [selectedId, setSelectedId] = useState("ED-T1");
   const [hover, setHover] = useState(null);
@@ -481,8 +553,8 @@ export default function CommandCenter() {
   const [flowLive, setFlowLive] = useState(false);
   const [flowSyncedAt, setFlowSyncedAt] = useState(null);
   const [flowNotice, setFlowNotice] = useState("");
-  const [badge, setBadge] = useState(1);
   const [bellOpen, setBellOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [showBeds, setShowBeds] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [spaceFilter, setSpaceFilter] = useState("all");
@@ -491,12 +563,10 @@ export default function CommandCenter() {
   const [zoom, setZoom] = useState(1.25);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fitToken, setFitToken] = useState(0);
-  const [incidentTitle, setIncidentTitle] = useState("");
-  const [incidentSeverity, setIncidentSeverity] = useState("high");
-  const [incidentPhoto, setIncidentPhoto] = useState(null);
   const mapRef = useRef(null);
   const sfxRef = useRef(null);
   const knownFlow = useRef(null);
+  const reloadRef = useRef(async () => {});
   const zoomRef = useRef(1.25);
   const [tab, setTab] = useState("overview");
   const [toast, setToast] = useState("");
@@ -518,7 +588,7 @@ export default function CommandCenter() {
   const selected = floor.rooms.find((room) => room.id === selectedId) || null;
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
-  const resolvedIncidents = useMemo(() => incidents.filter((item) => item.status === "resolved").slice(0, 3), [incidents]);
+  const badge = openIncidents.length;
   const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
   const queuePlace = useMemo(() => {
     const places = new Map();
@@ -542,36 +612,43 @@ export default function CommandCenter() {
 
     async function pull() {
       try {
-        const [censusRes, transferRes, flowRes, staffRes] = await Promise.all([
+        const [censusRes, transferRes, flowRes, staffRes, opsRes, incidentRes] = await Promise.all([
           fetch(apiUrl("/api/census")),
           fetch(apiUrl("/api/transfers")),
           fetch(apiUrl("/api/flow")),
           fetch(apiUrl("/api/staff")),
+          fetch(apiUrl("/api/ops")),
+          fetch(apiUrl("/api/incidents")),
         ]);
         if (stop) return;
-        if (censusRes.ok) {
-          const census = await censusRes.json();
-          if (stop) return;
+        const census = censusRes.ok ? await censusRes.json() : null;
+        const transferRows = transferRes.ok ? (await transferRes.json()).transfers || [] : [];
+        const staffRows = staffRes.ok ? (await staffRes.json()).staff || [] : [];
+        const flowBody = flowRes.ok ? await flowRes.json() : null;
+        if (census) {
           setHospital((current) => applyCensus(current, census.rooms));
           setSurgeOn(Boolean(census.surge));
         }
-        if (transferRes.ok) {
-          const body = await transferRes.json();
-          if (!stop) setTransfers(body.transfers || []);
+        if (!stop) {
+          setTransfers(transferRows);
+          setRoster(staffRows);
         }
-        if (staffRes.ok) {
-          const body = await staffRes.json();
-          if (!stop) setRoster(body.staff || []);
-        }
-        if (flowRes.ok) {
-          const body = await flowRes.json();
-          if (!stop) {
-            setMovements(body.events || []);
-            setFlowLive(true);
-            setFlowSyncedAt(Date.now());
-          }
+        if (flowBody && !stop) {
+          setMovements(flowBody.events || []);
+          setFlowLive(true);
+          setFlowSyncedAt(Date.now());
         } else if (!stop) {
           setFlowLive(false);
+        }
+        if (!stop && opsRes.ok) {
+          setOps(await opsRes.json());
+        } else if (!stop && census) {
+          setOps(buildLiveOps(census, transferRows, staffRows));
+        }
+        if (!stop && incidentRes.ok) {
+          setIncidents((await incidentRes.json()).incidents || []);
+        } else if (!stop && census) {
+          setIncidents(incidentsFromCensus(census));
         }
       } catch {
         if (!stop) setFlowLive(false);
@@ -579,6 +656,7 @@ export default function CommandCenter() {
     }
 
     pull();
+    reloadRef.current = pull;
     const timer = setInterval(pull, 4000);
     return () => {
       stop = true;
@@ -643,14 +721,14 @@ export default function CommandCenter() {
     setNote(null);
     setSummaryOpen(true);
     setFitToken((token) => token + 1);
-    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity" && nav !== "reports") setNav("live");
+    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity" && nav !== "reports" && nav !== "command" && nav !== "staff") setNav("live");
   }
 
   function playRoomSfx(id) {
     const room = floor.rooms.find((item) => item.id === id);
     if (!room) return;
 
-    const filename = SFX_BY_ROOM_ID[room.id] || voiceForRoom(room) || SFX_BY_DEPARTMENT[room.dept];
+    const filename = sfxForRoom(room);
     if (!filename) return;
 
     sfxRef.current?.pause();
@@ -678,7 +756,7 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    const boards = ["overview", "capacity", "flow", "incidents", "reports"];
+    const boards = ["command", "capacity", "flow", "incidents", "reports", "staff"];
     const onBoard = boards.includes(nav);
     const stayingBoard = boards.includes(id);
     if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
@@ -695,80 +773,87 @@ export default function CommandCenter() {
     setNote(NOTES[id]);
   }
 
-  function onIncidentPhoto(event) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      setIncidentPhoto(null);
+  async function runAction(path, body) {
+    const res = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data.detail;
+      throw new Error(typeof detail === "string" ? detail : "That action did not save.");
+    }
+    await reloadRef.current();
+    return data;
+  }
+
+  async function reportIncident(payload) {
+    try {
+      await runAction("/api/incidents", payload);
+      setActionNote(`${payload.room_id} is blocked until the incident is resolved.`);
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
+
+  async function resolveIncident(incidentId) {
+    if (typeof incidentId === "string" && incidentId.startsWith("census:")) {
+      setActionNote("That bed is blocked on the live census. There is no incident record to close yet.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => setIncidentPhoto(reader.result);
-    reader.readAsDataURL(file);
-  }
-
-  function reportIncident() {
-    const targetRoomId = selectedId || floor.rooms.find((room) => room.census)?.id || "ED-T1";
-    const title = incidentTitle.trim() || `${targetRoomId} needs engineering review`;
-
-    setIncidents((current) => [
-      {
-        id: `INC-${Date.now()}`,
-        roomId: targetRoomId,
-        title,
-        severity: incidentSeverity,
-        status: "open",
-        createdAt: new Date().toISOString(),
-        photo: incidentPhoto,
-      },
-      ...current,
-    ]);
-
-    setHospital((current) => current.map((level) => ({
-      ...level,
-      rooms: level.rooms.map((room) => {
-        if (room.id !== targetRoomId) return room;
-        const baseline = room._incidentBaseline || room.status;
-        return {
-          ...room,
-          status: "blocked",
-          _incidentBaseline: baseline,
-          incidentId: `INC-${Date.now()}`,
-          incidentTitle: title,
-        };
-      }),
-    })));
-
-    setSelectedId(targetRoomId);
-    setNav("incidents");
-    setIncidentTitle("");
-    setIncidentPhoto(null);
-    setToast(`${targetRoomId} is now blocked until resolved.`);
-  }
-
-  function resolveIncident(incidentId) {
     const incident = incidents.find((item) => item.id === incidentId);
-    if (!incident) return;
+    try {
+      const data = await runAction(`/api/incidents/${incidentId}/resolve`);
+      setActionNote(`${data.room_id || incident?.room_id || "Room"} restored.`);
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
 
-    setIncidents((current) => current.map((item) => (
-      item.id === incidentId ? { ...item, status: "resolved" } : item
-    )));
+  async function assignClean(roomId, housekeeperId) {
+    try {
+      await runAction(`/api/rooms/${roomId}/assign`, { housekeeper_id: housekeeperId });
+      setActionNote(`${roomId} has a housekeeper.`);
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
 
-    setHospital((current) => current.map((level) => ({
-      ...level,
-      rooms: level.rooms.map((room) => {
-        if (room.id !== incident.roomId) return room;
-        const nextStatus = room._incidentBaseline || "available";
-        return {
-          ...room,
-          status: nextStatus,
-          _incidentBaseline: null,
-          incidentId: null,
-          incidentTitle: null,
-        };
-      }),
-    })));
+  async function completeClean(roomId) {
+    try {
+      const data = await runAction(`/api/rooms/${roomId}/clean/complete`, {});
+      setActionNote(data.opened ? `${roomId} is usable.` : data.reason);
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
 
-    setToast(`${incident.roomId} is available again.`);
+  function openOpsItem(item) {
+    if (item.nav === "staff") {
+      chooseNav("staff");
+      return;
+    }
+    if (item.nav === "capacity") {
+      chooseNav("capacity");
+      return;
+    }
+    if (item.nav === "flow" && !item.room_id) {
+      chooseNav("flow");
+      return;
+    }
+    if (item.nav === "incidents" && !item.room_id) {
+      chooseNav("incidents");
+      return;
+    }
+    if (!item.room_id) return;
+    for (const level of hospital) {
+      const room = level.rooms.find((entry) => entry.id === item.room_id);
+      if (room) {
+        openHit({ floor: level, room });
+        return;
+      }
+    }
   }
 
   async function declareSurge() {
@@ -779,15 +864,14 @@ export default function CommandCenter() {
       const data = await res.json();
       setHospital((current) => applyCensus(current, data.rooms));
       setSurgeOn(true);
-      setBadge(3);
-      setNav("incidents");
-      setToast(
+      setActionNote(
         data.flipped
-          ? `${data.flipped} open beds on F1 and F3 are now held for the train collision.`
+          ? `${data.flipped} open beds on F1 and F3 are now held for the incoming surge.`
           : "No open surge beds left on F1 or F3.",
       );
+      await reloadRef.current();
     } catch {
-      setToast("Could not reach the census service.");
+      setActionNote("Could not reach the census service.");
     }
   }
 
@@ -937,16 +1021,49 @@ export default function CommandCenter() {
             <button
               type="button"
               className="icon-btn"
+              aria-label="Assistant"
+              onClick={() => {
+                setChatOpen((open) => !open);
+                setBellOpen(false);
+              }}
+            >
+              <Icon name="chat" />
+            </button>
+            <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
+          </div>
+          <div className="bell-wrap">
+            <button
+              type="button"
+              className="icon-btn"
               aria-label="Alerts"
-              onClick={() => setBellOpen((open) => !open)}
+              onClick={() => {
+                setBellOpen((open) => !open);
+                setChatOpen(false);
+              }}
             >
               <Icon name="bell" />
-              <em>{badge}</em>
+              {badge > 0 && <em>{badge}</em>}
             </button>
             {bellOpen && (
-              <div className="bell-pop">
-                <strong>Train collision — MCI</strong>
-                <p>Rail incident. Emergency and ICU are the receiving units.</p>
+              <div className="bell-pop bell-list">
+                <strong>Open incidents</strong>
+                {openIncidents.length === 0 ? (
+                  <p>No bed is blocked by an incident.</p>
+                ) : (
+                  openIncidents.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setBellOpen(false);
+                        openOpsItem({ nav: "live", room_id: item.room_id });
+                      }}
+                    >
+                      <b>{item.room_id}</b>
+                      <span>{item.title}</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -991,7 +1108,7 @@ export default function CommandCenter() {
               >
                 <Icon name={item.icon} />
                 <span className="nav-label">{item.label}</span>
-                {item.id === "incidents" && <em className="nav-badge">{badge}</em>}
+                {item.id === "incidents" && badge > 0 && <em className="nav-badge">{badge}</em>}
                 <span className="nav-tip">{item.label}</span>
               </button>
             ))}
@@ -1051,175 +1168,49 @@ export default function CommandCenter() {
               }}
             />
           )}
-          {nav === "overview" && (
-            <Overview
-              hospital={hospital}
+          {nav === "command" && (
+            <Command
+              ops={ops}
               surgeOn={surgeOn}
-              transfers={transfers}
-              movements={movements}
-              onOpenFloor={(id) => {
-                setFloorId(id);
-                setSelectedId(null);
-                setHover(null);
-                setNote(null);
-                setElevatorOpen(false);
-                setNav("live");
-                setFitToken((token) => token + 1);
-              }}
-              onOpenMovement={openMovement}
               onDeclareSurge={declareSurge}
+              onOpenItem={openOpsItem}
+              onAssign={assignClean}
+              onComplete={completeClean}
+              keepers={ops?.housekeepers || []}
+              notice={actionNote}
             />
           )}
           {nav === "flow" && (
             <PatientFlow
               movements={movements}
+              pending={ops?.pending || []}
               linked={flowLive}
               syncedAt={flowSyncedAt}
               onOpenMovement={openMovement}
             />
           )}
+          {nav === "staff" && (
+            <StaffBoard
+              ops={ops}
+              onAssign={assignClean}
+              notice={actionNote}
+            />
+          )}
           {nav === "incidents" && (
-            <div className="incidents-page">
-              <div className="incident incident-panel">
-                <div className="detail-head">
-                  <div>
-                    <p className="kicker">Operations</p>
-                    <h2>Incidents</h2>
-                  </div>
-                </div>
-
-                <div className="incidents-cols">
-                  <div className="incidents-col incidents-col-form">
-                    <div className="incident-form">
-                      <label>
-                        <span>Room</span>
-                        <strong>{selectedId || "ED-T1"}</strong>
-                      </label>
-                      <label>
-                        <span>Issue</span>
-                        <input
-                          value={incidentTitle}
-                          onChange={(event) => setIncidentTitle(event.target.value)}
-                          placeholder="Describe the blockage"
-                        />
-                      </label>
-                      <label>
-                        <span>Severity</span>
-                        <select value={incidentSeverity} onChange={(event) => setIncidentSeverity(event.target.value)}>
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                          <option value="critical">Critical</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span>Photo</span>
-                        <div className="incident-photo-field">
-                          {incidentPhoto ? (
-                            <div className="incident-photo-preview">
-                              <img src={incidentPhoto} alt="Incident attachment preview" />
-                              <button
-                                type="button"
-                                className="incident-photo-remove"
-                                onClick={() => setIncidentPhoto(null)}
-                                aria-label="Remove photo"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ) : (
-                            <label className="incident-photo-drop">
-                              <input type="file" accept="image/*" onChange={onIncidentPhoto} />
-                              <span>Add a photo</span>
-                            </label>
-                          )}
-                        </div>
-                      </label>
-                      <button type="button" className="surge-btn" onClick={reportIncident}>
-                        Report incident
-                      </button>
-                    </div>
-
-                    <button type="button" className="surge-btn" onClick={declareSurge} disabled={surgeOn}>
-                      {surgeOn ? "Surge declared" : "Declare surge"}
-                    </button>
-                    {surgeOn && (
-                      <p className="surge-note">
-                        Receiving units updated. Ride the elevator to F1 or F3 to see the beds turn critical.
-                      </p>
-                    )}
-                    {transfers.length > 0 && (
-                      <ul className="activity">
-                        {transfers.slice(0, 4).map((item) => (
-                          <li key={item.id}>
-                            <strong>{item.destination}</strong>
-                            <span>{item.patient_name}</span>
-                            <em>{item.reason === "icu_full" ? "ICU full" : "ORs full"}</em>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div className="incidents-col incidents-col-list">
-                    <div className="incident-section">
-                      <p className="kicker">Open</p>
-                      {openIncidents.length === 0 ? (
-                        <p className="detail-copy">No active incidents on the floor.</p>
-                      ) : (
-                        <ul className="incident-list">
-                          {openIncidents.map((item) => (
-                            <li key={item.id} className={item.photo ? "incident-row has-photo" : "incident-row"}>
-                              {item.photo && (
-                                <img className="incident-photo" src={item.photo} alt={`${item.roomId} incident`} />
-                              )}
-                              <div className="incident-row-body">
-                                <div className="incident-row-head">
-                                  <strong>{item.roomId}</strong>
-                                  <span className={`severity severity-${item.severity}`}>{item.severity}</span>
-                                </div>
-                                <p>{item.title}</p>
-                                <div className="incident-row-meta">
-                                  <small>{new Date(item.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</small>
-                                  <button type="button" onClick={() => resolveIncident(item.id)}>Resolve</button>
-                                </div>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-
-                    <div className="incident-section">
-                      <p className="kicker">Recent</p>
-                      <ul className="incident-list compact">
-                        {resolvedIncidents.length === 0 && <li className="detail-copy">No recent closures.</li>}
-                        {resolvedIncidents.map((item) => (
-                          <li key={item.id} className={item.photo ? "incident-row resolved has-photo" : "incident-row resolved"}>
-                            {item.photo && (
-                              <img className="incident-photo" src={item.photo} alt={`${item.roomId} incident`} />
-                            )}
-                            <div className="incident-row-body">
-                              <div className="incident-row-head">
-                                <strong>{item.roomId}</strong>
-                                <span className="severity resolved-tag">Resolved</span>
-                              </div>
-                              <p>{item.title}</p>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <IncidentsBoard
+              hospital={hospital}
+              incidents={incidents}
+              notice={actionNote}
+              onReport={reportIncident}
+              onResolve={resolveIncident}
+              onOpenRoom={(roomId) => openOpsItem({ nav: "live", room_id: roomId })}
+            />
           )}
           {nav === "reports" && (
             <Reports
               hospital={hospital}
               movements={movements}
-              transfers={transfers}
+              incidents={incidents}
               flowLive={flowLive}
               syncedAt={flowSyncedAt}
               onOpenRoom={(floorId, roomId) => {
@@ -1229,7 +1220,7 @@ export default function CommandCenter() {
               }}
             />
           )}
-          {nav !== "overview" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "reports" && (
+          {nav !== "command" && nav !== "staff" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "reports" && (
           <div
             ref={mapRef}
             className={`map-stage${rightOpen ? " has-detail" : ""}${liveMap ? " is-live" : ""}`}

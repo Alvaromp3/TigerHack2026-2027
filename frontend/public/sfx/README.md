@@ -14,7 +14,7 @@ Place the department sound files in this folder using these exact filenames:
 - Registration.mp3
 - Trump.mp3
 
-English room voice clips (played when a clinical, waiting, or staff room is clicked). Some are patients getting mad at the doctor, some are jokes, and voice-33 through voice-48 are grateful, relieved patients.
+English room voice clips. Each clip plays only in rooms that match its subject (waiting lines in waiting rooms, monitor lines in ICU, gown lines in the OR, and so on). The same room always plays the same clip. Registration and Administration keep their own files. Restrooms stay silent. Storage, sterile processing, the dock, and mechanical rooms keep the department tracks.
 
 - voice-01-three-hours.mp3
 - voice-02-waiting-room.mp3
@@ -67,4 +67,3 @@ English room voice clips (played when a clinical, waiting, or staff room is clic
 
 These files are served by the frontend at `/sfx/<filename>`. Tracks marked `(cut)` are stopped after 10 seconds during playback.
 
-The same room always plays the same voice clip. Registration and Administration keep their own files. Storage, morgue, dock, and mechanical rooms keep the department tracks.

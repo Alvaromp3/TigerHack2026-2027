@@ -10,25 +10,13 @@ const KINDS = [
   { id: "turnover", label: "Rooms opened" },
 ];
 
-const OPEN_STATUS = new Set(["cleaning", "blocked"]);
-
-function clock(iso) {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
+const OPEN_STATUS = new Set(["cleaning", "blocked", "reserved"]);
 
 function shiftLabel(date) {
   const hour = date.getHours();
   if (hour >= 7 && hour < 15) return "Day · 07:00–15:00";
   if (hour >= 15 && hour < 23) return "Evening · 15:00–23:00";
   return "Night · 23:00–07:00";
-}
-
-function kindLabel(item) {
-  const id = flowBucket(item);
-  return KINDS.find((kind) => kind.id === id)?.label || "Other";
 }
 
 function censusBeds(hospital) {
@@ -53,7 +41,7 @@ function csvCell(value) {
   return text;
 }
 
-export default function Reports({ hospital, movements, transfers, flowLive, syncedAt, onOpenRoom }) {
+export default function Reports({ hospital, movements, incidents = [], flowLive, syncedAt, onOpenRoom }) {
   const [floorId, setFloorId] = useState("all");
   const now = new Date();
   const beds = useMemo(() => censusBeds(hospital), [hospital]);
@@ -69,9 +57,12 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
   }, [movements, floorId, roomFloor]);
 
   const usable = scopedBeds.filter((room) => room.status === "available").length;
-  const occupied = scopedBeds.filter((room) => ["critical", "warning", "normal"].includes(room.status)).length;
   const cleaning = scopedBeds.filter((room) => room.status === "cleaning").length;
   const blocked = scopedBeds.filter((room) => room.status === "blocked").length;
+  const reserved = scopedBeds.filter((room) => room.status === "reserved").length;
+  const incidentByRoom = new Map(
+    incidents.filter((item) => item.status === "open").map((item) => [item.room_id, item]),
+  );
   const floors = hospital.map((floor) => {
     const rooms = beds.filter((room) => room.floorId === floor.id);
     const open = rooms.filter((room) => room.status === "available").length;
@@ -108,7 +99,11 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
         room.id,
         room.status,
         room.deptLabel,
-        room.status === "cleaning" ? "Cleaning still open" : (room.incidentTitle || "Out of service"),
+        room.status === "cleaning"
+          ? (room.housekeeper ? `Assigned to ${room.housekeeper}` : "Waiting for housekeeping")
+          : room.status === "reserved"
+            ? (room.holdFor ? `Reserved for ${room.holdFor}` : "Reserved")
+            : (incidentByRoom.get(room.id)?.title || "Out of service"),
       ].map(csvCell).join(",")),
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
@@ -144,60 +139,35 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
       </header>
 
       <p className="reports-source">
-        Source: live census{flowLive ? "" : " (flow log not connected)"}
+        Period: {shiftLabel(now)}. Source: live census{flowLive ? "" : " (flow log not connected)"}
         {synced ? ` · last sync ${synced}` : ""}.
-        Usable beds = census beds with status available. Occupied = critical, warning, or normal.
-        A room still in cleaning or blocked is not counted as usable, and an unfinished clean has no duration.
+        Usable beds = census beds with status available. A clean that has not finished has no duration.
       </p>
 
       <div className="reports-metrics">
         <article>
-          <span>Usable beds</span>
+          <span>Usable</span>
           <strong>{usable}</strong>
           <small>of {scopedBeds.length} census beds</small>
         </article>
         <article>
-          <span>Occupied</span>
-          <strong>{occupied}</strong>
-          <small>{scopedBeds.length ? Math.round((occupied / scopedBeds.length) * 100) : 0}% of census</small>
-        </article>
-        <article>
           <span>Cleaning</span>
           <strong>{cleaning}</strong>
-          <small>still closed</small>
+          <small>not usable yet</small>
         </article>
         <article>
-          <span>Out of service</span>
+          <span>Reserved</span>
+          <strong>{reserved}</strong>
+          <small>held, not open</small>
+        </article>
+        <article>
+          <span>Blocked</span>
           <strong>{blocked}</strong>
-          <small>{transfers.length} diversion records in view</small>
+          <small>incident on the bed</small>
         </article>
       </div>
 
       <div className="reports-grid">
-        <article>
-          <h3>By floor</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Floor</th>
-                <th>Usable</th>
-                <th>Occupied</th>
-                <th>Closed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {floors.map((floor) => (
-                <tr key={floor.id}>
-                  <td>{floor.code}</td>
-                  <td>{floor.open}</td>
-                  <td>{floor.busy}</td>
-                  <td>{floor.waiting}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
-
         <article>
           <h3>Movement in this log</h3>
           {scopedEvents.length === 0 ? (
@@ -213,12 +183,16 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
             </ul>
           )}
         </article>
+        <article>
+          <h3>Open work</h3>
+          <p className="reports-empty">{openWork.length} rooms are not usable in this filter.</p>
+        </article>
       </div>
 
       <article className="reports-table">
         <h3>Open work</h3>
         {openWork.length === 0 ? (
-          <p className="reports-empty">No cleaning or out-of-service beds in this filter.</p>
+          <p className="reports-empty">No cleaning, reserved, or blocked beds in this filter.</p>
         ) : (
           <table>
             <thead>
@@ -237,50 +211,9 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
                     <button type="button" onClick={() => onOpenRoom(room.floorId, room.id)}>{room.id}</button>
                   </td>
                   <td>{room.floorCode}</td>
-                  <td>{room.status === "cleaning" ? "Cleaning" : "Out of service"}</td>
-                  <td>
-                    {room.status === "cleaning"
-                      ? (room.housekeeper ? `Assigned to ${room.housekeeper}` : "Waiting for housekeeping")
-                      : (room.incidentTitle || "Held out of service")}
-                  </td>
-                  <td>In progress</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </article>
-
-      <article className="reports-table">
-        <h3>Latest events</h3>
-        {scopedEvents.length === 0 ? (
-          <p className="reports-empty">Insufficient data for event times.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Type</th>
-                <th>Room</th>
-                <th>Event</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scopedEvents.slice(0, 12).map((item) => (
-                <tr key={item.id}>
-                  <td>{clock(item.created_at)}</td>
-                  <td>{kindLabel(item)}</td>
-                  <td>
-                    {item.room_id ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenRoom(roomFloor.get(item.room_id), item.room_id)}
-                      >
-                        {item.room_id}
-                      </button>
-                    ) : "—"}
-                  </td>
-                  <td>{item.message}</td>
+                  <td>{room.status === "cleaning" ? "Cleaning" : room.status === "reserved" ? "Reserved" : "Blocked"}</td>
+                  <td>{closedReason(room, incidentByRoom)}</td>
+                  <td>{closedTime(room)}</td>
                 </tr>
               ))}
             </tbody>
@@ -289,4 +222,21 @@ export default function Reports({ hospital, movements, transfers, flowLive, sync
       </article>
     </section>
   );
+}
+
+function closedReason(room, incidentByRoom) {
+  if (room.status === "cleaning") {
+    if (room.linenStage && room.linenStage !== "ready") return "Linen is still out.";
+    if (room.housekeeper) return `Assigned to ${room.housekeeper}`;
+    return "Waiting for housekeeping";
+  }
+  if (room.status === "reserved") return room.holdFor ? `Reserved for ${room.holdFor}` : "Reserved";
+  return incidentByRoom.get(room.id)?.title || "Out of service";
+}
+
+function closedTime(room) {
+  if (room.status !== "cleaning" || room.ticksLeft == null || room.ticksLeft <= 0) return "No duration";
+  const seconds = room.ticksLeft * 9;
+  if (seconds >= 60) return `~${Math.round(seconds / 60)} min left`;
+  return `~${seconds}s left`;
 }

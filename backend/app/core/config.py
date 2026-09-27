@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     auth0_client_id: str = ""
     auth0_client_secret: str = ""
     database_url: str = "postgresql+psycopg://tigerhack:tigerhack@localhost:5433/tigerhack"
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o-mini"
 
     model_config = SettingsConfigDict(
         env_file=".env",

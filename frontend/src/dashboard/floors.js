@@ -52,6 +52,7 @@ export const STATUS = {
   available: { label: "Available", color: "#2f8f86" },
   cleaning: { label: "Cleaning", color: "#6b7db5" },
   blocked: { label: "Blocked", color: "#7c3aed" },
+  reserved: { label: "Reserved", color: "#ca8a04" },
 };
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
@@ -543,7 +544,7 @@ export function applyCensus(hospital, rooms) {
     rooms: floor.rooms.map((room) => {
       const live = byId.get(room.id);
       if (!live) return room;
-      const occupied = OCCUPIED_STATUS.has(live.status);
+      const occupied = OCCUPIED_STATUS.has(live.status) || (live.status === "blocked" && Boolean(live.patient));
       return {
         ...room,
         status: live.status,
@@ -563,6 +564,7 @@ export function applyCensus(hospital, rooms) {
         linenStage: live.status === "cleaning" ? live.linen_stage || null : null,
         linenTicks: live.status === "cleaning" ? live.linen_ticks ?? null : null,
         linenAide: live.status === "cleaning" ? live.linen_aide || null : null,
+        holdFor: live.status === "reserved" ? live.hold_for || null : null,
       };
     }),
   }));

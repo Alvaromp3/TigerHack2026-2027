@@ -4277,3 +4277,269 @@ button.pf-room:hover { text-decoration: underline; }
   .pf-phrase { grid-column: 1 / -1; }
   .pf-room { display: none; }
 }
+
+.command-page .reports-head .reports-tools button {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.command-page .reports-head .reports-tools button:disabled {
+  background: #eef2f6;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.command-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--blue-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.reports-metrics .command-metric {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.reports-metrics .command-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.reports-metrics .command-metric small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reports-metrics .command-metric.is-on {
+  border-color: var(--ink);
+  background: #fff;
+}
+
+.command-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.command-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.command-actions select,
+.staff-cleans select,
+.incident-form select,
+.incident-form input {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.command-actions button,
+.incident-form button,
+.staff-cleans select {
+  cursor: pointer;
+}
+
+.incident-form {
+  display: grid;
+  gap: 12px;
+}
+
+.incident-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.incident-form button {
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #fff;
+}
+
+.staff-cleans {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+
+.staff-cleans li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.staff-cleans span,
+.staff-cleans em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.pf-pending {
+  border: 1px solid var(--pf-line);
+  border-radius: 14px;
+  padding: 10px 12px 4px;
+  background: #f7f9fc;
+}
+
+.pf-pending p {
+  margin: 0 0 6px;
+  color: var(--pf-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pf-pending ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 168px;
+  overflow: auto;
+}
+
+.pf-pending li button,
+.pf-pending li div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 2px 12px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--pf-line);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.pf-pending strong { grid-row: span 2; align-self: center; }
+.pf-pending em {
+  color: var(--pf-muted);
+  font-style: normal;
+  font-size: 12px;
+}
+
+.assist-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(380px, 70vw);
+  height: 440px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  z-index: 30;
+  overflow: hidden;
+}
+
+.assist-pop header,
+.assist-pop form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.assist-pop form { border-bottom: 0; border-top: 1px solid var(--line); }
+
+.assist-pop header strong { flex: 1; font-size: 14px; }
+
+.assist-pop header button,
+.assist-pop form button {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.assist-pop form button {
+  padding: 0 12px;
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.assist-pop form input {
+  flex: 1;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 10px;
+}
+
+.assist-log {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assist-log p {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f7f9fc;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.assist-log .is-user {
+  background: var(--ink);
+  color: #fff;
+  align-self: flex-end;
+}
+
+.assist-log .is-error { background: #fde8e6; color: #8f2d24; }
+
+.bell-list {
+  width: 320px;
+  display: grid;
+  gap: 8px;
+}
+
+.bell-list button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #f7f9fc;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bell-list span { color: var(--muted); font-size: 12px; }
+

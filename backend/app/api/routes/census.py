@@ -34,6 +34,7 @@ def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | 
         "linen_stage": room.linen_stage,
         "linen_ticks": room.linen_ticks,
         "linen_aide": linen_aide,
+        "hold_for": room.hold_for,
     }
 
 

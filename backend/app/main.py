@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, census, health, root
+from app.api.routes import auth, census, chat, health, incidents, ops, rooms, root
 from app.core.config import settings
 from app.db import SessionLocal, init_db
 from app.sim import TICK_SECONDS, tick
@@ -53,4 +53,8 @@ app.add_middleware(
 app.include_router(root.router)
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(census.router, prefix="/api", tags=["census"])
+app.include_router(ops.router, prefix="/api", tags=["ops"])
+app.include_router(rooms.router, prefix="/api", tags=["rooms"])
+app.include_router(incidents.router, prefix="/api", tags=["incidents"])
+app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])

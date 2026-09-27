@@ -23,6 +23,7 @@ class Room(Base):
     queued_tick: Mapped[int | None] = mapped_column(Integer, nullable=True)
     linen_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
     linen_ticks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hold_for: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     patient: Mapped["Patient | None"] = relationship(back_populates="room", uselist=False)
 
@@ -104,6 +105,19 @@ class Staff(Base):
     shift: Mapped[str] = mapped_column(String(16))
     on_duty: Mapped[bool] = mapped_column(Boolean, default=True)
     extension: Mapped[str] = mapped_column(String(8))
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[str] = mapped_column(String(16), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    severity: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    baseline_status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class HospitalState(Base):

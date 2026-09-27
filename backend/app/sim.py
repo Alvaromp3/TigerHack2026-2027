@@ -3,12 +3,23 @@
 import logging
 import random
 import threading
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.catalog import DESTINATIONS, OCCUPIED, clinical_case, crew, fresh_patient_name
-from app.models import Death, FlowEvent, HospitalState, Housekeeper, LinenAide, Patient, Room, Transfer
+from app.models import (
+    Death,
+    FlowEvent,
+    HospitalState,
+    Housekeeper,
+    Incident,
+    LinenAide,
+    Patient,
+    Room,
+    Transfer,
+)
 
 log = logging.getLogger(__name__)
 write_lock = threading.Lock()
@@ -604,7 +615,7 @@ def _clear_clean(room: Room):
 
 
 def _people(db: Session, floor_id=None, dept=None, prefix=None, acuity=None, stable=False, needs_or=None, kind="bed", min_stay=None):
-    stmt = select(Patient).join(Room)
+    stmt = select(Patient).join(Room).where(Room.status != "blocked")
     if kind:
         stmt = stmt.where(Room.kind == kind)
     if floor_id:
@@ -685,3 +696,128 @@ def _team_for(room: Room):
 
 def _log(db: Session, name: str, message: str, room_id: str | None, kind: str):
     db.add(FlowEvent(patient_name=name, message=message, room_id=room_id, kind=kind))
+
+
+def reserve_room(db: Session, room_id: str, hold_for: str) -> str | None:
+    name = (hold_for or "").strip()
+    if not name:
+        return "Say who the bed is held for."
+    with write_lock:
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room is not on the census."
+        if room.patient is not None or room.status != "available":
+            return "Only an open bed can be reserved."
+        room.status = "reserved"
+        room.hold_for = name[:80]
+        _log(db, name[:80], f"{room.id} reserved for {name[:80]}", room.id, "move")
+        db.commit()
+    return None
+
+
+def release_room(db: Session, room_id: str) -> str | None:
+    with write_lock:
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room is not on the census."
+        if room.status != "reserved":
+            return "This bed is not reserved."
+        who = room.hold_for or "Hold"
+        room.status = "available"
+        room.hold_for = None
+        _log(db, who, f"{room.id} hold released", room.id, "move")
+        db.commit()
+    return None
+
+
+def assign_housekeeper(db: Session, room_id: str, keeper_id: int) -> str | None:
+    with write_lock:
+        room = db.get(Room, room_id)
+        keeper = db.get(Housekeeper, keeper_id)
+        if room is None or keeper is None:
+            return "Room or housekeeper was not found."
+        if room.status != "cleaning":
+            return "That room is not waiting on a clean."
+        if keeper.room_id and keeper.room_id != room.id:
+            return f"{keeper.name} is already on {keeper.room_id}."
+        for other in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+            if other.id != keeper.id:
+                other.room_id = None
+        keeper.room_id = room.id
+        _log(db, keeper.name, f"{keeper.name} assigned to {room.id}", room.id, "clean")
+        db.commit()
+    return None
+
+
+def complete_clean(db: Session, room_id: str) -> tuple[str | None, bool]:
+    with write_lock:
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room is not on the census.", False
+        if room.status != "cleaning":
+            return "That room is not in cleaning.", False
+        room.ticks_left = 0
+        keeper_name = None
+        for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+            keeper_name = keeper.name
+            keeper.room_id = None
+        opened = _try_open(db, room, keeper_name)
+        db.commit()
+        if opened:
+            return None, True
+        return "Linen is still out. The bed stays closed until clean linen is here.", False
+
+
+def open_incident(db: Session, room_id: str, title: str, severity: str) -> tuple[str | None, int | None]:
+    label = (title or "").strip()
+    if not label:
+        return "Describe the incident.", None
+    if severity not in {"low", "medium", "high", "critical"}:
+        return "Severity is not recognized.", None
+    with write_lock:
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room is not on the census.", None
+        existing = db.scalar(
+            select(Incident).where(Incident.room_id == room.id, Incident.status == "open")
+        )
+        if existing is not None or room.status == "blocked":
+            return "This room already has an open incident.", None
+        baseline = room.status
+        incident = Incident(
+            room_id=room.id,
+            title=label[:200],
+            severity=severity,
+            status="open",
+            baseline_status=baseline,
+        )
+        db.add(incident)
+        room.status = "blocked"
+        db.flush()
+        _log(db, "Command", f"{room.id} blocked — {label[:120]}", room.id, "move")
+        db.commit()
+        incident_id = incident.id
+    return None, incident_id
+
+
+def resolve_incident(db: Session, incident_id: int) -> str | None:
+    with write_lock:
+        incident = db.get(Incident, incident_id)
+        if incident is None:
+            return "Incident was not found."
+        if incident.status != "open":
+            return "That incident is already closed."
+        room = db.get(Room, incident.room_id)
+        if room is not None and room.status == "blocked":
+            room.status = incident.baseline_status or "available"
+        incident.status = "resolved"
+        incident.resolved_at = datetime.now(timezone.utc)
+        _log(
+            db,
+            "Command",
+            f"{incident.room_id} incident closed — restored {incident.baseline_status}",
+            incident.room_id,
+            "move",
+        )
+        db.commit()
+    return None

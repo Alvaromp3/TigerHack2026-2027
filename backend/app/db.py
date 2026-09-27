@@ -34,6 +34,7 @@ def init_db():
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS queued_tick INTEGER"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_stage VARCHAR(16)"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_ticks INTEGER"))
+        conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS hold_for VARCHAR(80)"))
     with SessionLocal() as db:
         seed_if_empty(db)
         pending = db.scalars(select_missing_cases()).all()
