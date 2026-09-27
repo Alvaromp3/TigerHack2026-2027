@@ -1,6 +1,5 @@
-/** Packed floor plates in meters. Room area is width × depth. */
+/** Packed floor plates in meters. */
 
-export const SITE = { w: 82, h: 66 };
 export const FRAME = { x: 2.5, y: 1.6, w: 76, h: 62.4 };
 export const BUILDING = { x: 4, y: 3, w: 72, h: 54 };
 
@@ -14,14 +13,7 @@ export const CORE = [
   { id: "elev-s", kind: "elevator", cab: "service", x: 42.1, y: 25.5, w: 2.9, h: 3.5, label: "S" },
 ];
 
-export const TREES = [
-  { x: 2.1, y: 8 }, { x: 1.5, y: 24 }, { x: 2.3, y: 46 },
-  { x: 79.6, y: 9 }, { x: 80.2, y: 30 }, { x: 79.2, y: 50 },
-  { x: 16, y: 1.3 }, { x: 42, y: 1.2 }, { x: 64, y: 1.5 },
-  { x: 20, y: 63.4 }, { x: 50, y: 63.6 }, { x: 70, y: 63.2 },
-];
-
-export const DEPT = {
+const DEPT = {
   icu: { label: "Intensive Care", color: "#d7f6ea", ink: "#0f766e" },
   surgery: { label: "Surgery (OR)", color: "#e6edf6", ink: "#4a78b0" },
   imaging: { label: "Radiology", color: "#e6e2ff", ink: "#5b21b6" },
@@ -75,81 +67,25 @@ export function spaceBucket(room) {
   if (OCCUPIED.has(room.status)) return "occupied";
   return null;
 }
-const GIVEN = [
-  "Sofia", "James", "Noah", "Amina", "Helen", "Mateo", "Grace", "Owen",
-  "Priya", "Samuel", "Lila", "Jonah", "Emma", "Hugo", "Nora", "Eliot",
-  "Clara", "Andre", "Maya", "Felix", "Camila", "Hassan", "Ruth", "Diego",
-  "Imani", "Lars", "Yara", "Mei", "Paul", "Nina", "Omar", "Leah",
-  "Victor", "Asha", "Elena", "Marcus", "Fatima", "Luis", "Hannah", "Kenji",
-  "Amara", "Theo", "Rosa", "Daniel", "Ines", "Malik", "Chloe", "Ravi",
-];
-const FAMILY = [
-  "Alvarez", "Whitfield", "Bennett", "Diallo", "Cho", "Ruiz", "Ibrahim", "Clarke",
-  "Nair", "Ortiz", "Berg", "Abebe", "Walsh", "Ferreira", "Kim", "March",
-  "Voss", "Blake", "Haddad", "Nguyen", "Brooks", "Petrov", "Okeke", "Tanaka",
-  "Cohen", "Lang", "Reddy", "Santos", "Moreau", "Keller", "Okada", "Diaz",
-];
-const PATIENTS = (() => {
-  const pool = [];
-  const seen = new Set();
-  const span = GIVEN.length * FAMILY.length;
-  for (let index = 0; index < span; index += 1) {
-    const given = GIVEN[index % GIVEN.length];
-    const family = FAMILY[(index * 7) % FAMILY.length];
-    let full = `${given} ${family}`;
-    if (seen.has(full)) full = FAMILY.map((last) => `${given} ${last}`).find((name) => !seen.has(name));
-    seen.add(full);
-    pool.push(full);
-  }
-  return pool;
-})();
-const TEAMS = {
-  icu: {
-    physicians: ["Dr. Leena Patel", "Dr. Omar Desta"],
-    nurses: ["RN Maya Chen", "RN Chris Novak", "RN Imani Diaz"],
-    charge: "RN Adeyemi",
-  },
-  ed: {
-    physicians: [
-      "Dr. Jonah Okonkwo", "Dr. Amina Diallo", "Dr. Keisha Ward", "Dr. Luis Ortega",
-      "Dr. Hannah Berg", "Dr. Samuel Cho", "Dr. Fatima Okeke",
-    ],
-    nurses: [
-      "RN Elena Brooks", "RN Jonah Blake", "RN Sofia Lang", "RN Owen Clarke",
-      "RN Ruth Ferreira", "RN Malik Santos", "RN Chloe Reddy", "RN Yara Nguyen",
-    ],
-    charge: "RN Weiss",
-  },
-  med: {
-    physicians: ["Dr. Amir Shah", "Dr. Elena Voss", "Dr. Andre Nair", "Dr. Mei Ortiz", "Dr. Daniel Ibrahim"],
-    nurses: ["RN Luis Ibarra", "RN Priya Raman", "RN Felix Haddad", "RN Ines Keller", "RN Ravi Petrov", "RN Amara Cohen"],
-    charge: "RN Adeyemi",
-  },
-  surg: {
-    physicians: ["Dr. Camila Alvarez", "Dr. Paul Kim", "Dr. Nora Abebe", "Dr. Victor Santos"],
-    nurses: ["RN Grace Walsh", "RN Diego Tanaka", "RN Leah Moreau", "RN Hassan Cole"],
-    charge: "RN Weiss",
-  },
+// Charge nurse per care team; the live census supplies everyone else.
+const CHARGE = {
+  icu: "RN Adeyemi",
+  ed: "RN Weiss",
+  med: "RN Adeyemi",
+  surg: "RN Weiss",
 };
-
-function area(w, h) {
-  return Math.round(w * h * 10) / 10;
-}
 
 function zone(spec) {
   return {
     census: false,
     status: null,
-    surge: false,
     patient: null,
     physician: null,
     nurse: null,
     kind: "zone",
     door: null,
     bed: null,
-    bath: null,
     ...spec,
-    area: area(spec.w, spec.h),
   };
 }
 
@@ -160,35 +96,26 @@ function furnish(room, head) {
     w: 0.96,
     h: Math.min(2.05, room.h - 0.9),
   };
-  const doorEdge = head === "s" ? "n" : "s";
   return {
     bed,
-    door: { edge: doorEdge, offset: 0.35, width: Math.min(1.22, room.w - 0.7) },
-    bath:
-      room.w >= 4 && room.h >= 5
-        ? { x: room.x + room.w - 1.7, y: doorEdge === "s" ? room.y + room.h - 1.45 : room.y, w: 1.55, h: 1.35 }
-        : null,
+    door: { edge: head === "s" ? "n" : "s", offset: 0.35, width: Math.min(1.22, room.w - 0.7) },
   };
 }
 
 // A bed has no status or patient until the live census fills it in. The plate never invents one.
 function bedRoom(spec) {
-  const crew = TEAMS[spec.team || "med"];
   const furniture = furnish(spec, spec.head || "n");
   return {
     census: true,
-    surge: false,
     kind: "bed",
-    charge: crew.charge,
+    charge: CHARGE[spec.team || "med"],
     door: furniture.door,
     bed: furniture.bed,
-    bath: furniture.bath,
     ...spec,
     status: null,
     patient: null,
     physician: null,
     nurse: null,
-    area: area(spec.w, spec.h),
   };
 }
 
@@ -196,7 +123,7 @@ function tile({
   x, y, cols, rows, w, h,
   prefix, start = 1,
   dept, deptLabel, type, team = "med",
-  surge = false, census = true, head = "n", kind = "bed",
+  census = true, head = "n", kind = "bed",
 }) {
   const rooms = [];
   let n = 0;
@@ -205,12 +132,10 @@ function tile({
       const rx = x + col * (w + GAP);
       const ry = y + row * (h + GAP);
       const num = start + n;
-      const id = `${prefix}-${String(num).padStart(prefix.startsWith("ED") ? 2 : 3, "0").slice(-3)}`;
       if (census) {
         rooms.push(bedRoom({
           id: prefix === "ED" || prefix === "ER" ? `${prefix}-${String(num).padStart(2, "0")}` : `${prefix}-${num}`,
-          dept, deptLabel, type, team, surge, head, kind,
-          nurseIndex: n,
+          dept, deptLabel, type, team, head, kind,
           x: rx, y: ry, w, h,
         }));
       } else {
@@ -235,7 +160,7 @@ function wc() {
 }
 
 function level(meta, rooms) {
-  return { ...meta, rooms, corridors: [] };
+  return { ...meta, rooms };
 }
 
 function buildF3() {
@@ -243,7 +168,7 @@ function buildF3() {
     ...tile({
       x: 5.2, y: 3.8, cols: 6, rows: 2, w: 4.6, h: 5.4,
       prefix: "ICU", start: 301, dept: "icu", deptLabel: "Intensive Care",
-      type: "ICU — Single", team: "icu", surge: true, head: "n",
+      type: "ICU — Single", team: "icu", head: "n",
     }),
     bedRoom({
       id: "OR-1", dept: "surgery", deptLabel: "Surgery (OR)", type: "Operating room", kind: "or",
@@ -261,16 +186,16 @@ function buildF3() {
     zone({ id: "PHARM", dept: "pharmacy", deptLabel: "Pharmacy", type: "Pharmacy", x: 51.2, y: 16.4, w: 9.2, h: 6.2, label: "Pharmacy" }),
     bedRoom({
       id: "ER-T1", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 5.2, y: 16.2, w: 5.5, h: 4.6, team: "ed", surge: true, head: "n",
+      x: 5.2, y: 16.2, w: 5.5, h: 4.6, team: "ed", head: "n",
     }),
     bedRoom({
       id: "ER-T2", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 11.0, y: 16.2, w: 5.5, h: 4.6, team: "ed", surge: true, nurseIndex: 1, head: "n",
+      x: 11.0, y: 16.2, w: 5.5, h: 4.6, team: "ed", head: "n",
     }),
     ...tile({
       x: 5.2, y: 21.4, cols: 4, rows: 3, w: 3.4, h: 3.55,
       prefix: "ER", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "ED — Exam", team: "ed", surge: true, head: "n",
+      type: "ED — Exam", team: "ed", head: "n",
     }),
     ...tile({
       x: 66.2, y: 16.2, cols: 2, rows: 4, w: 4.0, h: 4.15,
@@ -387,16 +312,16 @@ function buildF1() {
   const rooms = [
     bedRoom({
       id: "ED-T1", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 5.2, y: 3.8, w: 5.5, h: 4.6, team: "ed", surge: true,
+      x: 5.2, y: 3.8, w: 5.5, h: 4.6, team: "ed",
     }),
     bedRoom({
       id: "ED-T2", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 11, y: 3.8, w: 5.5, h: 4.6, team: "ed", surge: true, nurseIndex: 1,
+      x: 11, y: 3.8, w: 5.5, h: 4.6, team: "ed",
     }),
     ...tile({
       x: 5.2, y: 9.2, cols: 6, rows: 2, w: 3.4, h: 3.6,
       prefix: "ED", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "ED — Exam", team: "ed", surge: true,
+      type: "ED — Exam", team: "ed",
     }),
     zone({ id: "F1-CT", dept: "imaging", deptLabel: "Radiology", type: "CT suite", x: 46, y: 3.8, w: 8, h: 5.2, label: "CT" }),
     zone({ id: "F1-XR", dept: "imaging", deptLabel: "Radiology", type: "X-ray", x: 54.5, y: 3.8, w: 8, h: 5.2, label: "X-ray" }),
@@ -408,12 +333,12 @@ function buildF1() {
     ...tile({
       x: 5.2, y: 36, cols: 5, rows: 2, w: 3.6, h: 4,
       prefix: "FAST", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "Fast track", team: "ed", surge: true,
+      type: "Fast track", team: "ed",
     }),
     ...tile({
       x: 24.6, y: 36, cols: 4, rows: 2, w: 4.15, h: 4.1,
       prefix: "OBS", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "Observation", team: "ed", surge: true,
+      type: "Observation", team: "ed",
     }),
     zone({ id: "F1-RES", dept: "support", deptLabel: "Support", type: "Resuscitation support", x: 46, y: 36, w: 14, h: 8, label: "Resuscitation" }),
     zone({ id: "F1-LAB", dept: "support", deptLabel: "Support", type: "Stat lab", x: 62, y: 36, w: 10, h: 8, label: "Stat lab" }),
@@ -535,8 +460,6 @@ export function findRooms(hospital, query) {
   return hits.slice(0, 8);
 }
 
-const OCCUPIED_STATUS = new Set(["critical", "warning", "normal"]);
-
 export function applyCensus(hospital, rooms) {
   const byId = new Map(rooms.map((room) => [room.id, room]));
   return hospital.map((floor) => ({
@@ -544,7 +467,7 @@ export function applyCensus(hospital, rooms) {
     rooms: floor.rooms.map((room) => {
       const live = byId.get(room.id);
       if (!live) return room;
-      const occupied = OCCUPIED_STATUS.has(live.status) || (live.status === "blocked" && Boolean(live.patient));
+      const occupied = OCCUPIED.has(live.status) || (live.status === "blocked" && Boolean(live.patient));
       return {
         ...room,
         status: live.status,
@@ -582,63 +505,4 @@ export function applyCensus(hospital, rooms) {
       };
     }),
   }));
-}
-
-function unusedName(used) {
-  const name = PATIENTS.find((candidate) => !used.has(candidate));
-  used.add(name);
-  return name;
-}
-
-export function applySurge(hospital) {
-  let flipped = 0;
-  const used = new Set(hospital.flatMap((floor) => floor.rooms.map((room) => room.patient).filter(Boolean)));
-  const next = hospital.map((floor) => {
-    if (floor.id !== "F1" && floor.id !== "F3") return floor;
-    return {
-      ...floor,
-      rooms: floor.rooms.map((room) => {
-        if (!room.census || !room.surge || room.status !== "available") return room;
-        flipped += 1;
-        const crew = room.dept === "icu" ? TEAMS.icu : TEAMS.ed;
-        return {
-          ...room,
-          status: "critical",
-          patient: unusedName(used),
-          physician: crew.physicians[flipped % crew.physicians.length],
-          nurse: crew.nurses[flipped % crew.nurses.length],
-          activity: [
-            { time: "10:24", text: "Assigned from train collision surge", tag: "Command" },
-            { time: "10:24", text: "Bed held for incoming critical", tag: "Charge nurse" },
-          ],
-        };
-      }),
-    };
-  });
-  return { hospital: next, flipped };
-}
-
-function hits(a, b) {
-  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-  return w > 0.05 && h > 0.05;
-}
-
-export function audit(hospital) {
-  const problems = [];
-  const inner = { x: 4.4, y: 3.4, w: 71.2, h: 53.2 };
-  for (const floor of hospital) {
-    const shapes = [...floor.rooms, ...CORE];
-    for (let i = 0; i < shapes.length; i += 1) {
-      const a = shapes[i];
-      if (a.x < inner.x - 0.05 || a.y < inner.y - 0.05 || a.x + a.w > inner.x + inner.w + 0.15 || a.y + a.h > inner.y + inner.h + 0.15) {
-        problems.push(`${floor.id} ${a.id} outside plate`);
-      }
-      for (let j = i + 1; j < shapes.length; j += 1) {
-        const b = shapes[j];
-        if (hits(a, b)) problems.push(`${floor.id} ${a.id || "core"} overlaps ${b.id || "core"}`);
-      }
-    }
-  }
-  return problems;
 }

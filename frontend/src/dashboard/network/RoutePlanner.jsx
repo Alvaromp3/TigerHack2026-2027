@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { actorHeaders, apiUrl } from "../../api/client";
+import { apiUrl } from "../../api/client";
 import { COMPLAINTS, ESI, ZONES } from "./ems";
 
 // "Where should this ambulance go?" Ranks the region for one patient and sends the pre-alert.
-export default function RoutePlanner({ canSend = true, onSent, onPick }) {
+export default function RoutePlanner({ onPick }) {
   const [esi, setEsi] = useState(2);
   const [complaint, setComplaint] = useState("stroke");
   const [zone, setZone] = useState("East");
@@ -36,13 +36,12 @@ export default function RoutePlanner({ canSend = true, onSent, onPick }) {
     try {
       const res = await fetch(apiUrl("/api/ems/runs"), {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...actorHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ esi, complaint, zone, destination }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : "The pre-alert did not send.");
       setNote(`${body.code} sent to ${destination} · ETA ${Math.max(1, Math.round((body.eta_seconds || 0) / 60))} min`);
-      onSent?.(body);
     } catch (error) {
       setNote(error.message);
     } finally {
@@ -104,7 +103,7 @@ export default function RoutePlanner({ canSend = true, onSent, onPick }) {
                 <strong>{row.hospital}</strong>
                 <small>{row.drive_minutes} min drive · {row.data === "live" ? "live capacity" : "emulated feed"}</small>
               </div>
-              {canSend && row.eligible && (
+              {row.eligible && (
                 <button type="button" className="dark-btn" disabled={Boolean(sending)} onClick={() => send(row.hospital)}>
                   {sending === row.hospital ? "Sending…" : "Send pre-alert"}
                 </button>

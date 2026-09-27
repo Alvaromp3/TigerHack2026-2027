@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.db import get_db
 from app.api.routes.insights import insights
-from app import care, ems
+from app import care, ems, facility
+from app.api.routes.platform import overview as platform_overview
 from app.infra.events import classify
 from app.models import (
     AmbulanceRun,
@@ -52,10 +53,16 @@ How to answer:
   ("answer_within_minutes").
 - Each patient's "right_now" is what is being done at this moment: in an operating room, the operation
   (with "surgeon"); elsewhere, the current step of care. Use it for "what is happening in OR-2?".
+- "infrastructure" is the hospital as a building and as a system: each floor and what is on it, beds by
+  unit and status, equipment (CT, MRI, ORs, elevators), services, the operating rooms right now, cleaning
+  crews, and the health of every connected digital system (EHR feed, EMS network, public API, webhooks;
+  "mode" says which feeds are emulated for this demo). "regional_availability" covers the partner hospitals.
+- Broad questions ("how is our infrastructure", "how are we doing", "give me a status") get a short
+  overview from those fields, never a refusal. Say something is missing only when no field covers it.
 - For an ambulance or a new patient, match ESI and complaint to the open beds by unit and name the bed.
 - ESI 1 is the most urgent and 5 the least. NEWS comes from vitals; 5 or more means urgent review.
 - Patients are synthetic demo data: answer about operations, never give medical advice.
-- Reply in the language of the latest user message. Keep it under 120 words."""
+- Reply in the language of the latest user message. Keep it under 120 words, 170 for a whole-hospital overview."""
 
 
 BRIEFING = """You write the operations briefing for the director of Tiger Memorial Hospital.
@@ -294,6 +301,60 @@ def _ems_context(db: Session) -> dict:
     }
 
 
+def _infrastructure_context(db: Session) -> dict:
+    """The hospital as a building and as a system, for questions like "how is our infrastructure"."""
+    rooms = db.scalars(select(Room).options(selectinload(Room.patient)).order_by(Room.id)).all()
+    beds: dict[str, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
+    for room in rooms:
+        beds[room.floor_id][room.dept][room.status] += 1
+    activities = care.by_patient(db)
+    theatres = []
+    for room in (room for room in rooms if room.kind == "or"):
+        doing = care.payload(activities.get(room.patient.id) if room.patient else None, room.id)
+        theatres.append({
+            "room": room.id,
+            "status": room.status,
+            "surgery": doing["activity"] if doing["activity_kind"] == "surgery" else None,
+            "surgeon": room.patient.physician if room.patient else None,
+            "since": doing["activity_started_at"],
+        })
+    keepers = db.scalars(select(Housekeeper)).all()
+    aides = db.scalars(select(LinenAide)).all()
+    systems = platform_overview(db)
+    return {
+        "hospital": ems.HOME,
+        "services": ems.HOSPITALS[ems.HOME]["services"],
+        "floors": [
+            {
+                "floor": floor,
+                "name": name,
+                "what_is_here": list(what),
+                "beds_by_unit": {unit: dict(counts) for unit, counts in beds.get(floor, {}).items()},
+            }
+            for floor, name, what in facility.FLOORS
+        ],
+        "equipment": facility.EQUIPMENT,
+        "operating_rooms": theatres,
+        "cleaning_crews": {
+            "housekeepers": {"total": len(keepers), "on_a_room": sum(1 for keeper in keepers if keeper.room_id)},
+            "linen_aides": {"total": len(aides), "on_a_room": sum(1 for aide in aides if aide.room_id)},
+            "rooms_in_turnover": sum(1 for room in rooms if room.status == "cleaning"),
+        },
+        "digital_systems": {
+            "overall": systems["status"],
+            "connected_systems": [
+                {key: row.get(key) for key in ("name", "category", "protocol", "mode", "status", "events_60m", "last_event_at", "description")}
+                for row in systems["integrations"]
+            ],
+            "database_latency_ms": systems["health"]["database"]["latency_ms"],
+            "simulation_tick_age_seconds": (systems["health"]["simulation"] or {}).get("age_seconds"),
+            "uptime_seconds": systems["health"]["uptime_seconds"],
+            "webhooks": systems["webhooks"],
+            "alerts": systems["alerts"],
+        },
+    }
+
+
 class ChatTurn(BaseModel):
     role: str
     content: str = Field(max_length=2000)
@@ -365,6 +426,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
     snapshot = build_ops(db)
     ems_context = _ems_context(db)
     database = _database_context(db)
+    infrastructure = _infrastructure_context(db)
     db.commit()
     db.close()
     brief = {
@@ -381,6 +443,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         ],
         "housekeepers": snapshot["housekeepers"],
         "waiting_for_a_bed": snapshot["pending"][:20],
+        "infrastructure": infrastructure,
         **ems_context,
     }
     messages = [{"role": turn["role"], "content": turn["content"]} for turn in turns]

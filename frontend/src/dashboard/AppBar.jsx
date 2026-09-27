@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-export const TABS = [
+const TABS = [
   { id: "overview", label: "Overview", icon: "gauge" },
   { id: "live", label: "Live Map", icon: "map" },
   { id: "ambulances", label: "Ambulances", icon: "ambulance" },

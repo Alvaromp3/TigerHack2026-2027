@@ -13,7 +13,6 @@ function doorGeom(room) {
     const y = room.y + room.h;
     return {
       gap: [x, y, x + width, y],
-      arc: `M ${x} ${y} A ${width} ${width} 0 0 0 ${x + width} ${y - width}`,
     };
   }
   if (edge === "n") {
@@ -21,7 +20,6 @@ function doorGeom(room) {
     const y = room.y;
     return {
       gap: [x, y, x + width, y],
-      arc: `M ${x} ${y} A ${width} ${width} 0 0 1 ${x + width} ${y + width}`,
     };
   }
   if (edge === "w") {
@@ -29,14 +27,12 @@ function doorGeom(room) {
     const y = room.y + offset;
     return {
       gap: [x, y, x, y + width],
-      arc: `M ${x} ${y} A ${width} ${width} 0 0 1 ${x + width} ${y + width}`,
     };
   }
   const x = room.x + room.w;
   const y = room.y + offset;
   return {
     gap: [x, y, x, y + width],
-    arc: `M ${x} ${y} A ${width} ${width} 0 0 0 ${x - width} ${y + width}`,
   };
 }
 
@@ -68,8 +64,6 @@ function Stairs({ item }) {
     </g>
   );
 }
-
-// Elevator component
 
 function Elevator({ item, active }) {
   const cx = item.x + item.w / 2;
@@ -214,12 +208,8 @@ const BUCKET_FILL = {
 
 export default function FloorPlan({
   floor,
-  deptFilter,
   spaceFilter = "all",
-  layer = "all",
   selectedId,
-  showBeds,
-  showLabels,
   zoom,
   pan,
   elevatorOpen,
@@ -353,15 +343,12 @@ export default function FloorPlan({
       <path d={SHELL} fill="#ffffff" stroke="#e7ebf0" strokeWidth="0.45" filter="url(#plate-shadow)" />
       <g clipPath="url(#plate)">
         {floor.rooms.map((room) => {
-          const dim = deptFilter !== "all" && room.dept !== deptFilter;
           const selected = room.id === selectedId;
           const bucket = spaceBucket(room);
           const statusMiss = spaceFilter !== "all" && bucket !== spaceFilter;
-          const layerMiss = layer === "beds" && !room.census;
           const door = doorGeom(room);
           let fill = BUCKET_FILL[bucket] || "#f4f7fb";
           if (room.kind === "restroom") fill = "#eef2f6";
-          const faded = dim || statusMiss || layerMiss;
           const marker = room.census ? STATUS[room.status] : null;
           const incoming = emsByRoom[room.id];
           const bay = room.id === "EMS" && emsBayActive;
@@ -377,7 +364,7 @@ export default function FloorPlan({
               key={room.id}
               data-room={room.id}
               className={`map-hit${selected ? " is-selected" : ""}${incoming ? " is-ems" : ""}${bay ? " is-ems-bay" : ""}`}
-              opacity={faded ? (statusMiss ? 0.18 : 0.35) : 1}
+              opacity={statusMiss ? 0.18 : 1}
             >
               <rect
                 className="room-shape"
@@ -415,7 +402,7 @@ export default function FloorPlan({
                   style={{ pointerEvents: "none" }}
                 />
               )}
-              {showBeds && room.census && room.bed && (
+              {room.census && room.bed && (
                 <rect
                   x={room.bed.x}
                   y={room.bed.y}
@@ -441,7 +428,7 @@ export default function FloorPlan({
               {room.kind === "restroom" && (
                 <Lavatory x={room.x + room.w / 2} y={room.y + room.h / 2 - 0.15} />
               )}
-              {showLabels && <RoomTag room={room} selected={selected} override={override} />}
+              <RoomTag room={room} selected={selected} override={override} />
               {marker && (
                 <circle
                   cx={room.x + room.w - dotR - 0.3}

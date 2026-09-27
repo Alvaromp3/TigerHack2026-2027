@@ -31,7 +31,7 @@ function bedLook(id) {
   return { src: "/rooms/ed-exam.png", kind: "Emergency exam room" };
 }
 
-function BedVisual({ id, label }) {
+function BedVisual({ id, label, empty }) {
   const look = bedLook(id);
   return (
     <div className="bed-visual">
@@ -39,7 +39,7 @@ function BedVisual({ id, label }) {
       <div>
         <small>{label}</small>
         <strong>{id || "—"}</strong>
-        <span>{look.kind}</span>
+        <span>{id ? look.kind : empty || look.kind}</span>
       </div>
     </div>
   );
@@ -77,11 +77,10 @@ function Timeline({ run }) {
   );
 }
 
-export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, focusId, onAccept, onDivert, onHandoff, onOpenRoom }) {
+export default function AmbulancesTab({ runs, summary, hospitals, busy, focusId, onAccept, onDivert, onHandoff, onOpenRoom }) {
   const now = useNow();
   const [selectedId, setSelectedId] = useState(null);
-  const [bedChoice, setBedChoice] = useState("");
-  const [divertTo, setDivertTo] = useState("");
+  const [bestPartner, setBestPartner] = useState(null);
   const [recent, setRecent] = useState([]);
 
   const queue = useMemo(
@@ -89,20 +88,32 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
     [runs],
   );
   const selected = queue.find((run) => run.id === selectedId) || queue[0] || null;
-  const openBeds = useMemo(
-    () => beds.filter((room) => room.dept === "ed" && room.status === "available").map((room) => room.id).sort(),
-    [beds],
-  );
-  const partners = hospitals.filter((row) => row.name !== "Tiger Memorial");
+  const partnerRow = hospitals.find((row) => row.name === bestPartner) || null;
 
   useEffect(() => {
     if (focusId != null) setSelectedId(focusId);
   }, [focusId]);
 
+  // Where a divert would send this crew: the same ranking the API uses, asked once per ambulance.
   useEffect(() => {
-    setBedChoice(selected?.bed_id || "");
-    setDivertTo("");
-  }, [selected?.id, selected?.bed_id]);
+    setBestPartner(null);
+    if (!selected || !["pending", "accepted"].includes(selected.status)) return undefined;
+    let stop = false;
+    const query = new URLSearchParams({ esi: selected.esi, complaint: selected.complaint, zone: selected.zone });
+    fetch(apiUrl(`/api/public/route?${query}`))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (stop || !body) return;
+        const others = (body.options || []).filter((row) => row.hospital !== "Tiger Memorial");
+        setBestPartner((others.find((row) => row.eligible) || others[0])?.hospital || null);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+    // Re-rank only when a different ambulance is selected or its state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.status]);
 
   useEffect(() => {
     let stop = false;
@@ -134,7 +145,6 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
         respiratoryRate: selected.vitals.respiratory_rate,
       })
     : null;
-  const bedOptions = selected?.bed_id && !openBeds.includes(selected.bed_id) ? [selected.bed_id, ...openBeds] : openBeds;
 
   return (
     <div className="page has-hero amb2">
@@ -240,8 +250,15 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                     </div>
                   ) : (
                     <BedVisual
-                      id={selected.status === "pending" ? bedChoice : selected.bed_id}
-                      label={selected.status === "pending" ? "Bed we would hold" : "Bed held"}
+                      id={selected.bed_id}
+                      label={
+                        selected.status !== "pending"
+                          ? "Bed held"
+                          : selected.bed_id
+                            ? "Free bed, picked automatically"
+                            : "No suitable bed free"
+                      }
+                      empty="Divert, or free a bed on the live map"
                     />
                   )}
                   <Timeline run={selected} />
@@ -258,20 +275,14 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
               )}
               <footer className="amb-actions">
                 {selected.status === "pending" && (
-                  <>
-                    <label className="amb-field">
-                      <span>Bed</span>
-                      <select value={bedChoice} onChange={(event) => setBedChoice(event.target.value)}>
-                        {!bedOptions.length && <option value="">No open ED bed</option>}
-                        {bedOptions.map((id) => (
-                          <option key={id} value={id}>{id}{id === selected.bed_id ? " · suggested" : ""}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <button type="button" className="amb-accept" disabled={Boolean(busy) || !bedOptions.length} onClick={() => onAccept(selected, bedChoice || null)}>
-                      {busy === `accept:${selected.id}` ? "Holding bed…" : `Accept & hold ${bedChoice || "bed"}`}
-                    </button>
-                  </>
+                  // No bed is named: the API holds the free bed picked for this crew, or the next free one.
+                  <button type="button" className="amb-accept" disabled={Boolean(busy) || !selected.bed_id} onClick={() => onAccept(selected, null)}>
+                    {busy === `accept:${selected.id}`
+                      ? "Holding bed…"
+                      : selected.bed_id
+                        ? `Accept · hold ${selected.bed_id}`
+                        : "No free bed to hold"}
+                  </button>
                 )}
                 {selected.status === "accepted" && (
                   <button type="button" className="amb-accept is-ghost" onClick={() => onOpenRoom(selected.bed_id)}>
@@ -285,17 +296,18 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
                 )}
                 {selected.status !== "arrived" && (
                   <div className="amb-divert">
-                    <select value={divertTo} onChange={(event) => setDivertTo(event.target.value)} aria-label="Divert to">
-                      <option value="">Best partner hospital</option>
-                      {partners.map((row) => (
-                        <option key={row.name} value={row.name}>
-                          {row.name} · {row.ems_status === "diverting" ? "diverting" : `${row.units.ed.open} ED open`}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="button" className="amb-divert-btn" disabled={Boolean(busy)} onClick={() => onDivert(selected, divertTo || null)}>
-                      {busy === `divert:${selected.id}` ? "Diverting…" : "Divert"}
+                    <button type="button" className="amb-divert-btn" disabled={Boolean(busy)} onClick={() => onDivert(selected, bestPartner)}>
+                      {busy === `divert:${selected.id}`
+                        ? "Diverting…"
+                        : bestPartner
+                          ? `Divert → ${bestPartner}`
+                          : "Divert to the best partner"}
                     </button>
+                    {partnerRow?.units?.ed && (
+                      <small>
+                        {partnerRow.ems_status === "diverting" ? "Also on diversion" : `${partnerRow.units.ed.open} ED beds open there`}
+                      </small>
+                    )}
                   </div>
                 )}
               </footer>
@@ -304,7 +316,7 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, fo
             <div className="amb-empty">
               <img src="/rooms/ems.png" alt="" />
               <strong>All quiet on the road.</strong>
-              <span>When a crew sends a pre-alert you will hear a chime and see it here, with a bed already suggested.</span>
+              <span>When a crew sends a pre-alert you will hear a chime and see it here, with a free bed already picked for them.</span>
             </div>
           )}
         </section>

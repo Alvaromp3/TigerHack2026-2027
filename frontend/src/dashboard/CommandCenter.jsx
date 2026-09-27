@@ -6,7 +6,6 @@ import {
   NURSE_LOAD,
   formatEta,
   turnoverPlan,
-  censusRooms,
   earlyWarning,
   stayLabel,
 } from "./insights";
@@ -21,8 +20,7 @@ import {
   spaceBucket,
   summarize,
 } from "./floors";
-import { actorHeaders, apiUrl } from "../api/client";
-import { flowBucket } from "./flowBuckets";
+import { apiUrl } from "../api/client";
 import { buildLiveOps, incidentsFromCensus } from "./liveOps";
 import AmbulancesTab from "./AmbulancesTab";
 import { AppNav } from "./AppBar";
@@ -33,7 +31,7 @@ import { loadSnapshot, saveSnapshot } from "./snapshot";
 import NotificationsPanel, { desktopAlertsOn, lastSeenActivity, latestActivityId } from "./NotificationsPanel";
 import AiMark from "./AiMark";
 import { ESI, countdown } from "./network/ems";
-import { EtaTrack, bedMix, floorRows, localBriefing } from "./ui";
+import { EtaTrack, floorRows, localBriefing } from "./ui";
 import "./dashboard.css";
 import "./exec.css";
 import "./ems.css";
@@ -90,15 +88,6 @@ function sfxForRoom(room) {
   return SFX_BY_DEPARTMENT[room.dept] || null;
 }
 
-const NOTES = {
-  overview: "Census for this floor is the card on the left. The plate stays on screen.",
-  capacity: "Open beds are the available count. Surge fills Emergency and ICU first.",
-  flow: "Every admit, floor move, OR case, discharge, and diversion.",
-  staff: "Each occupied bed shows the attending and the primary nurse. The charge nurse covers the unit.",
-  reports: "Counts come from the live census and the last 200 flow events.",
-  three: "3D is off. This command view is the measured 2D plate.",
-};
-
 function Icon({ name }) {
   const common = {
     width: 20,
@@ -111,73 +100,6 @@ function Icon({ name }) {
     strokeLinejoin: "round",
     "aria-hidden": true,
   };
-  if (name === "map") {
-    return (
-      <svg {...common}>
-        <path d="M4 6.5 9.2 4l5.6 2.4L20 4.2V17.5l-5.2 2.3-5.6-2.4L4 19.6V6.5z" />
-        <path d="M9.2 4v13.4M14.8 6.4V19.8" />
-      </svg>
-    );
-  }
-  if (name === "grid") {
-    return (
-      <svg {...common}>
-        <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
-        <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
-        <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
-        <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" />
-      </svg>
-    );
-  }
-  if (name === "bed") {
-    return (
-      <svg {...common}>
-        <path d="M3 18V9.5A1.5 1.5 0 0 1 4.5 8H8a2.5 2.5 0 0 1 2.5 2.5V13" />
-        <path d="M3 13h18v5M3 18h18" />
-        <path d="M21 18v-5.5A2.5 2.5 0 0 0 18.5 10H10" />
-      </svg>
-    );
-  }
-  if (name === "flow") {
-    return (
-      <svg {...common}>
-        <path d="M4 7h16M4 12h16M4 17h16" />
-      </svg>
-    );
-  }
-  if (name === "broom") {
-    return (
-      <svg {...common}>
-        <path d="M12 20h7" />
-        <path d="m14.6 6.2 3.2 3.2" />
-        <path d="M16.4 3.4a1.9 1.9 0 0 1 2.7 2.7L8.4 17 4 18.2 5.2 14 16.4 3.4z" />
-      </svg>
-    );
-  }
-  if (name === "users") {
-    return (
-      <svg {...common}>
-        <circle cx="12" cy="8" r="3.2" />
-        <path d="M5.2 20v-1.1A4.8 4.8 0 0 1 10 14.1h4a4.8 4.8 0 0 1 4.8 4.8V20" />
-      </svg>
-    );
-  }
-  if (name === "alert") {
-    return (
-      <svg {...common}>
-        <path d="M12 4 20.5 19h-17L12 4z" />
-        <path d="M12 10v4.2M12 17.2h.01" />
-      </svg>
-    );
-  }
-  if (name === "chart") {
-    return (
-      <svg {...common}>
-        <path d="M5 19V5M5 19h14" />
-        <path d="M9 16v-4M13 16V8M17 16v-2" />
-      </svg>
-    );
-  }
   if (name === "search") {
     return (
       <svg {...common}>
@@ -191,13 +113,6 @@ function Icon({ name }) {
       <svg {...common}>
         <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4l2-2z" />
         <path d="M10 19a2 2 0 0 0 4 0" />
-      </svg>
-    );
-  }
-  if (name === "chat") {
-    return (
-      <svg {...common}>
-        <path d="M5 6.5h14v9H8l-3 2.5V6.5z" />
       </svg>
     );
   }
@@ -479,30 +394,20 @@ export default function CommandCenter() {
   );
   const [incidents, setIncidents] = useState([]);
   const [ops, setOps] = useState(null);
-  const [actionNote, setActionNote] = useState("");
   const [floorId, setFloorId] = useState("F1");
   const [selectedId, setSelectedId] = useState(null);
   const [hover, setHover] = useState(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [nav, setNav] = useState("overview");
-  const [navCollapsed, setNavCollapsed] = useState(false);
-  const [note, setNote] = useState(null);
   const [elevatorOpen, setElevatorOpen] = useState(false);
   const [surgeOn, setSurgeOn] = useState(false);
-  const [incomingNotice, setIncomingNotice] = useState("");
-  const [calledPhysicians, setCalledPhysicians] = useState(0);
-  const [divertedCount, setDivertedCount] = useState(0);
-  const [transfers, setTransfers] = useState([]);
   const [roster, setRoster] = useState([]);
   const [movements, setMovements] = useState([]);
   const [flowLive, setFlowLive] = useState(false);
   const [flowSyncedAt, setFlowSyncedAt] = useState(null);
-  const [flowNotice, setFlowNotice] = useState("");
   const [bellOpen, setBellOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [showBeds, setShowBeds] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
   const [spaceFilter, setSpaceFilter] = useState("all");
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [syncTick, setSyncTick] = useState(() => Date.now());
@@ -512,9 +417,7 @@ export default function CommandCenter() {
   const mapRef = useRef(null);
   const stageRef = useRef(null);
   const sfxRef = useRef(null);
-  const knownFlow = useRef(null);
   const reloadRef = useRef(async () => {});
-  const zoomRef = useRef(1.25);
   const [tab, setTab] = useState("overview");
   const [insights, setInsights] = useState(null);
   const [briefing, setBriefing] = useState({ text: "", source: "rules", loading: false, at: 0 });
@@ -533,29 +436,21 @@ export default function CommandCenter() {
     }
     return counts;
   }, [floor]);
-  const liveMap = nav === "live";
   const selected = floor.rooms.find((room) => room.id === selectedId) || null;
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
-  const [surgeBusy, setSurgeBusy] = useState("");
+  const [actionBusy, setActionBusy] = useState("");
   const [emsRuns, setEmsRuns] = useState(() => boot?.runs || []);
   const [emsSummary, setEmsSummary] = useState(() => boot?.summary || null);
   const [emsStatus, setEmsStatus] = useState(() => boot?.status || { ems_status: "accepting", reason: null });
   const [focusRunId, setFocusRunId] = useState(null);
   const [region, setRegion] = useState(() => boot?.region || []);
   const seenRuns = useRef(null);
-  const allBeds = useMemo(() => censusRooms(hospital), [hospital]);
   const roomIds = useMemo(
     () => new Set(hospital.flatMap((level) => level.rooms.map((room) => room.id))),
     [hospital],
   );
-  const mix = useMemo(() => bedMix(allBeds), [allBeds]);
   const floors = useMemo(() => floorRows(hospital), [hospital]);
-  const deptLabels = useMemo(() => Object.fromEntries(allBeds.map((room) => [room.dept, room.deptLabel])), [allBeds]);
-  const edPatients = useMemo(
-    () => allBeds.filter((room) => (room.dept === "ed" || room.dept === "trauma") && room.patient).length,
-    [allBeds],
-  );
   const incoming = useMemo(
     () => emsRuns.filter((run) => run.destination === "Tiger Memorial" && ["pending", "accepted", "arrived"].includes(run.status)),
     [emsRuns],
@@ -639,9 +534,6 @@ export default function CommandCenter() {
         if (census) {
           setHospital((current) => applyCensus(current, census.rooms));
           setSurgeOn(Boolean(census.surge));
-          setIncomingNotice(census.incoming_notice || "");
-          setCalledPhysicians(census.called_physicians || 0);
-          setDivertedCount(census.diverted_count || 0);
           saveSnapshot({ census: { rooms: census.rooms } });
         }
         if (flowBody && !stop) {
@@ -664,7 +556,6 @@ export default function CommandCenter() {
         if (!full || stop) return;
         const transferRows = transferRes.ok ? (await transferRes.json()).transfers || [] : [];
         const staffRows = staffRes.ok ? (await staffRes.json()).staff || [] : [];
-        setTransfers(transferRows);
         setRoster(staffRows);
         if (opsRes.ok) setOps(await opsRes.json());
         else if (census) setOps(buildLiveOps(census, transferRows, staffRows));
@@ -833,30 +724,6 @@ export default function CommandCenter() {
   }, [nav]);
 
   useEffect(() => {
-    const ids = new Set(movements.map((item) => item.id));
-    if (knownFlow.current == null) {
-      knownFlow.current = ids;
-      return;
-    }
-    const arrived = movements.filter((item) => !knownFlow.current.has(item.id));
-    knownFlow.current = ids;
-    if (nav === "flow" || arrived.length === 0) return;
-    const critical = arrived.find((item) => {
-      const bucket = flowBucket(item);
-      return bucket === "death" || bucket === "divert";
-    });
-    if (!critical) return;
-    const code = flowBucket(critical) === "death" ? "DTH" : "DV";
-    setFlowNotice(`${code}  ${critical.patient_name || critical.message}`);
-  }, [movements, nav]);
-
-  useEffect(() => {
-    if (!flowNotice) return undefined;
-    const timer = setTimeout(() => setFlowNotice(""), 8000);
-    return () => clearTimeout(timer);
-  }, [flowNotice]);
-
-  useEffect(() => {
     function onKey(event) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -886,7 +753,6 @@ export default function CommandCenter() {
     setSelectedId(null);
     setElevatorOpen(false);
     setHover(null);
-    setNote(null);
     setSummaryOpen(true);
     setFitToken((token) => token + 1);
     setNav("live");
@@ -914,7 +780,6 @@ export default function CommandCenter() {
     setFloorId(hit.floor.id);
     setSelectedId(hit.room.id);
     setNav("live");
-    setNote(null);
     setElevatorOpen(false);
     setSearchOpen(false);
     setQuery(hit.room.id);
@@ -924,7 +789,6 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    setNote(null);
     setSearchOpen(false);
     setBellOpen(false);
     if (id === "live" && nav !== "live") {
@@ -934,133 +798,26 @@ export default function CommandCenter() {
     setNav(id);
   }
 
-  async function runAction(path, body) {
-    let res;
-    try {
-      res = await fetch(apiUrl(path), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...actorHeaders() },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch {
-      throw new Error("The hospital did not answer. Make sure the server is on, then try again.");
-    }
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 404) {
-      throw new Error("The live hospital answered, but this button is not on that server yet. The map and the numbers are live.");
-    }
-    if (!res.ok) {
-      const detail = data.detail;
-      throw new Error(typeof detail === "string" ? detail : "That did not save. Try again.");
-    }
-    await reloadRef.current();
-    return data;
-  }
-
-  async function reportIncident(payload) {
-    try {
-      await runAction("/api/incidents", payload);
-      setActionNote(`${payload.room_id} is blocked until the incident is resolved.`);
-    } catch (error) {
-      setActionNote(error.message);
-    }
-  }
-
-  async function resolveIncident(incidentId) {
-    if (typeof incidentId === "string" && incidentId.startsWith("census:")) {
-      setActionNote("That bed is blocked on the live census. There is no incident record to close yet.");
-      return;
-    }
-    const incident = incidents.find((item) => item.id === incidentId);
-    try {
-      const data = await runAction(`/api/incidents/${incidentId}/resolve`);
-      setActionNote(`${data.room_id || incident?.room_id || "Room"} restored.`);
-    } catch (error) {
-      setActionNote(error.message);
-    }
-  }
-
-  async function assignClean(roomId, housekeeperId) {
-    try {
-      await runAction(`/api/rooms/${roomId}/assign`, { housekeeper_id: housekeeperId });
-      setActionNote(`${roomId} has someone cleaning it. Press “The bed is ready” when they finish.`);
-    } catch (error) {
-      setActionNote(error.message);
-    }
-  }
-
-  async function completeClean(roomId) {
-    try {
-      const data = await runAction(`/api/rooms/${roomId}/clean/complete`, {});
-      setActionNote(data.opened ? `${roomId} is ready for a patient. The open-bed number went up.` : data.reason);
-    } catch (error) {
-      setActionNote(error.message);
-    }
-  }
-
-  function openOpsItem(item) {
-    if (item.nav === "capacity") {
-      chooseNav("capacity");
-      return;
-    }
-    if (!item.room_id) return;
-    for (const level of hospital) {
-      const room = level.rooms.find((entry) => entry.id === item.room_id);
-      if (room) {
-        openHit({ floor: level, room });
-        return;
-      }
-    }
-  }
-
-  function applyActionState(data) {
-    if (data.rooms) setHospital((current) => applyCensus(current, data.rooms));
-    setSurgeOn(Boolean(data.surge));
-    setIncomingNotice(data.incoming_notice || "");
-    setCalledPhysicians(data.called_physicians || 0);
-    setDivertedCount(data.diverted_count || 0);
-  }
-
-  // One surge request at a time; the result is shown on the map as a toast.
-  async function surgeStep(key, work) {
-    if (surgeBusy) return false;
-    setSurgeBusy(key);
+  // One request at a time; the result is shown on the map as a toast.
+  async function runStep(key, work) {
+    if (actionBusy) return false;
+    setActionBusy(key);
     try {
       const message = await work();
-      setActionNote(message);
       setToast(message);
       return true;
     } catch (error) {
-      setActionNote(error.message);
       setToast(error.message);
       return false;
     } finally {
-      setSurgeBusy("");
+      setActionBusy("");
     }
-  }
-
-  function callPhysicians() {
-    return surgeStep("call", async () => {
-      const data = await runAction("/api/decisions/on-call");
-      applyActionState(data);
-      return `${data.called} on-call physicians are now on duty.`;
-    });
-  }
-
-  function divertPatients() {
-    return surgeStep("divert", async () => {
-      const data = await runAction("/api/decisions/transfer-overflow");
-      applyActionState(data);
-      return data.diverted
-        ? `${data.diverted} Emergency patients transferred to County General. Their beds are in turnover.`
-        : "Emergency has nobody to transfer.";
-    });
   }
 
   async function emsAction(path, body) {
     const res = await fetch(apiUrl(path), {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...actorHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });
     const data = await res.json().catch(() => ({}));
@@ -1073,54 +830,34 @@ export default function CommandCenter() {
   }
 
   function acceptRun(run, bedId) {
-    return surgeStep(`accept:${run.id}`, async () => {
+    return runStep(`accept:${run.id}`, async () => {
       const data = await emsAction(`/api/ems/runs/${run.id}/accept`, { bed_id: bedId });
       return `${data.unit} accepted. ${data.bed_id} is held on the live map.`;
     });
   }
 
   function divertRun(run, to) {
-    return surgeStep(`divert:${run.id}`, async () => {
+    return runStep(`divert:${run.id}`, async () => {
       const data = await emsAction(`/api/ems/runs/${run.id}/divert`, { to });
       return `${data.unit} diverted to ${data.diverted_to}. The crew has been told.`;
     });
   }
 
   function handoffRun(run) {
-    return surgeStep(`handoff:${run.id}`, async () => {
+    return runStep(`handoff:${run.id}`, async () => {
       const data = await emsAction(`/api/ems/runs/${run.id}/handoff`);
       return `${data.patient_name} is in ${data.bed_id}. Offload took ${data.offload_seconds ?? 0}s.`;
     });
   }
 
   function openRoomById(roomId) {
-    openOpsItem({ nav: "live", room_id: roomId });
-  }
-
-  function runRailAction(item) {
-    const run = item.run;
-    if (!run) return Promise.resolve(false);
-    if (run.kind === "call") return callPhysicians();
-    if (run.kind === "divert") return divertPatients();
-    return surgeStep(item.id, async () => {
-      if (run.kind === "assign") {
-        await runAction(`/api/rooms/${run.roomId}/assign`, { housekeeper_id: run.keeperId });
-        return `Housekeeper on the way to ${run.roomId}. ${item.gain}.`;
+    for (const level of hospital) {
+      const room = level.rooms.find((entry) => entry.id === roomId);
+      if (room) {
+        openHit({ floor: level, room });
+        return;
       }
-      if (run.kind === "complete") {
-        const data = await runAction(`/api/rooms/${run.roomId}/clean/complete`, {});
-        return data.opened ? `${run.roomId} is open for the next patient.` : data.reason;
-      }
-      if (run.kind === "discharge") {
-        await runAction(`/api/rooms/${run.roomId}/discharge`);
-        return `Patient discharged. ${run.roomId} is in turnover and opens after the clean.`;
-      }
-      if (run.kind === "resolve") {
-        await runAction(`/api/incidents/${run.incidentId}/resolve`);
-        return `${item.roomId} is back in service.`;
-      }
-      return "Done.";
-    });
+    }
   }
 
   useEffect(() => {
@@ -1128,8 +865,6 @@ export default function CommandCenter() {
     const timer = setTimeout(() => setToast(""), 7000);
     return () => clearTimeout(timer);
   }, [toast]);
-
-  zoomRef.current = zoom;
 
   useLayoutEffect(() => {
     const stage = mapRef.current;
@@ -1153,7 +888,6 @@ export default function CommandCenter() {
       const scaleW = (FRAME.w * freeW) / (bw * width);
       const scaleH = (FRAME.h * freeH) / (bh * height);
       const z = Math.max(0.22, Math.min(scaleW, scaleH));
-      zoomRef.current = z;
       setZoom(z);
       const fx = (left + freeW / 2) / width;
       const fy = (top + freeH / 2) / height;
@@ -1173,7 +907,7 @@ export default function CommandCenter() {
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [fitToken, selectedId, note]);
+  }, [fitToken, selectedId]);
 
   function fitMap() {
     setFitToken((token) => token + 1);
@@ -1193,32 +927,7 @@ export default function CommandCenter() {
     ? floor.rooms.filter((room) => room.census && room.dept === selected.dept)
     : [];
   const clock = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  const dateLabel = now.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const rightOpen = Boolean(selected) || Boolean(note);
-
-  function openMovement(event) {
-    if (!event.room_id) return;
-    for (const level of hospital) {
-      const room = level.rooms.find((item) => item.id === event.room_id);
-      if (room) {
-        openHit({ floor: level, room });
-        return;
-      }
-    }
-  }
-
-  function placeNavTip(event) {
-    const tip = event.currentTarget.querySelector(".nav-tip");
-    if (!tip) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    tip.style.top = `${rect.top + rect.height / 2}px`;
-    tip.style.left = `${rect.right + 14}px`;
-  }
+  const rightOpen = Boolean(selected);
 
   return (
     <div className={`shell view-${nav}`}>
@@ -1292,7 +1001,7 @@ export default function CommandCenter() {
               incidents={openIncidents}
               capacity={homeCapacity}
               movements={movements}
-              busy={surgeBusy}
+              busy={actionBusy}
               onClose={() => setBellOpen(false)}
               onSeen={setSeenActivity}
               onOpenRun={(run) => {
@@ -1380,9 +1089,8 @@ export default function CommandCenter() {
             <AmbulancesTab
               runs={emsRuns}
               summary={emsSummary}
-              beds={allBeds}
               hospitals={region}
-              busy={surgeBusy}
+              busy={actionBusy}
               focusId={focusRunId}
               onAccept={acceptRun}
               onDivert={divertRun}
@@ -1413,81 +1121,79 @@ export default function CommandCenter() {
               setBellOpen(false);
             }}
           >
-            {liveMap && (
-              <header className="live-bar">
-                <div className="live-bar-top">
-                  <div>
-                    <p className="live-kicker">Live map · {floor.code}</p>
-                    <h2 className="live-title">{floor.subtitle || floor.name}</h2>
-                  </div>
-                  <div className="live-actions">
-                    <span className={flowLive ? "live-sync" : "live-sync is-wait"}>
-                      <i />
-                      {flowLive && flowSyncedAt
-                        ? `Live · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
-                        : boot
-                          ? "Last snapshot · reconnecting"
-                          : "Connecting to hospital"}
-                    </span>
-                    <div className="floor-seg" role="group" aria-label="Floor">
-                      {hospital.map((level) => (
-                        <button
-                          key={level.id}
-                          type="button"
-                          className={level.id === floor.id ? "is-on" : ""}
-                          aria-pressed={level.id === floor.id}
-                          title={level.subtitle || level.name}
-                          onClick={() => goToFloor(level.id)}
-                        >
-                          {level.code}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className={elevatorOpen ? "live-btn is-on" : "live-btn"}
-                      aria-expanded={elevatorOpen}
-                      onClick={() => setElevatorOpen((open) => !open)}
-                    >
-                      Elevator
-                    </button>
-                    <button
-                      type="button"
-                      className={summaryOpen ? "live-btn is-on" : "live-btn"}
-                      aria-pressed={summaryOpen}
-                      onClick={() => {
-                        setSummaryOpen((open) => !open);
-                        fitMap();
-                      }}
-                    >
-                      Summary
-                    </button>
-                  </div>
+            <header className="live-bar">
+              <div className="live-bar-top">
+                <div>
+                  <p className="live-kicker">Live map · {floor.code}</p>
+                  <h2 className="live-title">{floor.subtitle || floor.name}</h2>
                 </div>
-                <div className="space-filters" role="toolbar" aria-label="Filter spaces">
-                  {SPACE_FILTERS.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={spaceFilter === item.id ? "space-chip is-on" : "space-chip"}
-                      onClick={() => setSpaceFilter(item.id)}
-                    >
-                      {item.dot && <i style={{ background: item.dot }} />}
-                      {item.label}
-                      <b>{spaceCounts[item.id]}</b>
-                    </button>
-                  ))}
+                <div className="live-actions">
+                  <span className={flowLive ? "live-sync" : "live-sync is-wait"}>
+                    <i />
+                    {flowLive && flowSyncedAt
+                      ? `Live · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
+                      : boot
+                        ? "Last snapshot · reconnecting"
+                        : "Connecting to hospital"}
+                  </span>
+                  <div className="floor-seg" role="group" aria-label="Floor">
+                    {hospital.map((level) => (
+                      <button
+                        key={level.id}
+                        type="button"
+                        className={level.id === floor.id ? "is-on" : ""}
+                        aria-pressed={level.id === floor.id}
+                        title={level.subtitle || level.name}
+                        onClick={() => goToFloor(level.id)}
+                      >
+                        {level.code}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className={elevatorOpen ? "live-btn is-on" : "live-btn"}
+                    aria-expanded={elevatorOpen}
+                    onClick={() => setElevatorOpen((open) => !open)}
+                  >
+                    Elevator
+                  </button>
+                  <button
+                    type="button"
+                    className={summaryOpen ? "live-btn is-on" : "live-btn"}
+                    aria-pressed={summaryOpen}
+                    onClick={() => {
+                      setSummaryOpen((open) => !open);
+                      fitMap();
+                    }}
+                  >
+                    Summary
+                  </button>
                 </div>
-                {spaceFilter !== "all" && spaceCounts[spaceFilter] === 0 && (
-                  <p className="space-empty">
-                    No {SPACE_FILTERS.find((item) => item.id === spaceFilter)?.empty} on {floor.code}.{" "}
-                    <button type="button" onClick={() => setSpaceFilter("all")}>Clear filter</button>
-                  </p>
-                )}
-              </header>
-            )}
+              </div>
+              <div className="space-filters" role="toolbar" aria-label="Filter spaces">
+                {SPACE_FILTERS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={spaceFilter === item.id ? "space-chip is-on" : "space-chip"}
+                    onClick={() => setSpaceFilter(item.id)}
+                  >
+                    {item.dot && <i style={{ background: item.dot }} />}
+                    {item.label}
+                    <b>{spaceCounts[item.id]}</b>
+                  </button>
+                ))}
+              </div>
+              {spaceFilter !== "all" && spaceCounts[spaceFilter] === 0 && (
+                <p className="space-empty">
+                  No {SPACE_FILTERS.find((item) => item.id === spaceFilter)?.empty} on {floor.code}.{" "}
+                  <button type="button" onClick={() => setSpaceFilter("all")}>Clear filter</button>
+                </p>
+              )}
+            </header>
             <div className="map-body">
-            {(!liveMap || summaryOpen) && (
+            {summaryOpen && (
             <aside className="overview">
               <h2>{floor.name} overview</h2>
               <p className="overview-sub">{floor.subtitle}</p>
@@ -1523,14 +1229,10 @@ export default function CommandCenter() {
             <div className="map-canvas">
             <FloorPlan
               floor={floor}
-              deptFilter="all"
-              spaceFilter={liveMap ? spaceFilter : "all"}
+              spaceFilter={spaceFilter}
               emsByRoom={emsByRoom}
               emsBayActive={emsBayActive}
-              layer="all"
               selectedId={selectedId}
-              showBeds={showBeds}
-              showLabels={showLabels}
               zoom={zoom}
               pan={pan}
               elevatorOpen={elevatorOpen}
@@ -1541,8 +1243,6 @@ export default function CommandCenter() {
               onSelect={(id) => {
                 playRoomSfx(id);
                 setSelectedId(id);
-                setNav("live");
-                setNote(null);
                 setTab("overview");
               }}
               onHover={setHover}
@@ -1599,32 +1299,7 @@ export default function CommandCenter() {
 
             {rightOpen && (
               <aside className="detail">
-                {note && (
-                  <div className="incident">
-                    <div className="detail-head">
-                      <h2>{nav === "staff" ? "Staff" : "Live map"}</h2>
-                      <button type="button" className="icon-btn" onClick={() => { setNote(null); setNav("live"); }} aria-label="Close">
-                        ×
-                      </button>
-                    </div>
-                    {nav === "staff" ? (
-                      <ul className="activity">
-                        {roster.length === 0 && <li><span>Roster is loading.</span></li>}
-                        {roster.map((person) => (
-                          <li key={person.id}>
-                            <strong>{person.name}</strong>
-                            <span>{person.specialty} · {person.unit.toUpperCase()} · ext {person.extension}</span>
-                            <em>{person.on_duty ? `${person.shift} shift` : "Off duty"}</em>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>{note}</p>
-                    )}
-                  </div>
-                )}
-
-                {!note && selected && (
+                {selected && (
                   <RoomCard
                     room={selected}
                     floor={floor}
@@ -1637,7 +1312,7 @@ export default function CommandCenter() {
                     incidents={openIncidents.filter((item) => item.room_id === selected.id)}
                     queuePlace={queuePlace.get(selected.id) || null}
                     emsRun={incoming.find((run) => run.bed_id === selected.id) || null}
-                    busy={surgeBusy}
+                    busy={actionBusy}
                     onAcceptRun={acceptRun}
                     onHandoffRun={handoffRun}
                     onOpenRoom={openRoomById}

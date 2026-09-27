@@ -454,7 +454,8 @@ def suggest_bed(db: Session, esi: int, complaint: str, exclude: set[str] | None 
     ]
     if not beds:
         return None
-    if esi == 1:
+    if esi == 1 or (esi == 2 and complaint == "trauma"):
+        # Resuscitation, and major trauma that needs a trauma bay on arrival.
         order = ("ED-T", "ER-T", "ED-", "ER-", "OBS-")
     elif esi == 2:
         order = ("ED-", "ED-T", "ER-", "OBS-")
@@ -468,6 +469,40 @@ def suggest_bed(db: Session, esi: int, complaint: str, exclude: set[str] | None 
                 return room.id
     # The sickest never go to fast track: no suitable bed means make room or divert.
     return beds[0].id if esi >= 3 else None
+
+
+def refresh_suggestions(db: Session) -> int:
+    """Keep every unanswered pre-alert pointing at a bed that is free right now.
+
+    The bed is picked for the crew when they call in; by the time someone answers it may be taken,
+    or one may have opened. Sicker patients are served first and no two pre-alerts share a bed,
+    so the person answering only has to accept or divert.
+    """
+    pending = db.scalars(
+        select(AmbulanceRun)
+        .where(AmbulanceRun.destination == HOME, AmbulanceRun.status == "pending")
+        .order_by(AmbulanceRun.esi, AmbulanceRun.eta_at)
+    ).all()
+    if not pending:
+        return 0
+    claimed = set(db.scalars(
+        select(AmbulanceRun.bed_id).where(AmbulanceRun.status.in_(("accepted", "arrived")), AmbulanceRun.bed_id.is_not(None))
+    ).all())
+    occupied = {room_id for (room_id,) in db.execute(select(Patient.room_id)).all()}
+    changed = 0
+    for run in pending:
+        room = db.get(Room, run.bed_id) if run.bed_id else None
+        free = room is not None and room.status == "available" and room.id not in occupied and room.id not in claimed
+        if not free:
+            best = suggest_bed(db, run.esi, run.complaint, claimed)
+            if best != run.bed_id:
+                run.bed_id = best
+                changed += 1
+        if run.bed_id:
+            claimed.add(run.bed_id)
+    if changed:
+        db.commit()
+    return changed
 
 
 def _held_beds(db: Session) -> set[str]:
@@ -709,6 +744,9 @@ def tick(db: Session, rng: random.Random | None = None, generate: bool = True) -
         if room.hold_for not in coming:
             sim.release_room(db, room.id)
             notes.append(f"released stale hold on {room.id}")
+
+    if refresh_suggestions(db):
+        notes.append("pre-alert beds refreshed")
 
     if generate:
         # Top up: never fewer than MIN_INCOMING ambulances on their way to this hospital.
