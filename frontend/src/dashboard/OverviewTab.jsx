@@ -58,7 +58,7 @@ export default function OverviewTab({
       />
 
       <div className="ov-hero">
-        <section className="brief" data-demo="briefing">
+        <section className="brief">
           <div className="brief-glow" aria-hidden="true" />
           <header>
             <span className="brief-mark" aria-hidden="true">
@@ -83,7 +83,7 @@ export default function OverviewTab({
           <BriefingLines text={briefing.text} />
         </section>
 
-        <section className="capacity" data-demo="capacity">
+        <section className="capacity">
           <p className="card-kicker">Hospital capacity</p>
           <div className="cap-top">
             <div className="cap-big">
@@ -104,6 +104,7 @@ export default function OverviewTab({
       <div className="kpi-row">
         <Kpi
           label="Occupancy trend"
+          icon="trend"
           value={`${mix.pct}%`}
           note={history.length > 1 ? `since you opened · ${history.length} readings` : "collecting readings"}
           spark={occupancy}
@@ -111,6 +112,8 @@ export default function OverviewTab({
         />
         <Kpi
           label="Admitted · 2 h"
+          icon="in"
+          loading={!insights}
           value={totals ? totals.admit : "—"}
           note={net == null ? "" : net > 0 ? `+${net} net · filling` : net < 0 ? `${net} net · emptying` : "balanced"}
           spark={admits}
@@ -118,6 +121,8 @@ export default function OverviewTab({
         />
         <Kpi
           label="Discharged · 2 h"
+          icon="out"
+          loading={!insights}
           value={totals ? totals.discharge : "—"}
           note={totals?.transfer ? `${totals.transfer} transferred out` : "no transfers out"}
           spark={discharges}
@@ -125,6 +130,8 @@ export default function OverviewTab({
         />
         <Kpi
           label="Bed turnover"
+          icon="clock"
+          loading={!insights}
           value={minutesText(insights?.turnover?.avg_minutes)}
           unit="min"
           note={insights?.turnover?.samples ? `average of ${insights.turnover.samples} beds` : "no beds turned yet"}
@@ -132,7 +139,7 @@ export default function OverviewTab({
       </div>
 
       <div className="ov-grid">
-        <Card kicker="Floors" title="Where the beds are" className="floors-card" demo="floors">
+        <Card kicker="Floors" title="Where the beds are" icon="layers" className="floors-card">
           <ul className="floor-list">
             {floors.map((row) => (
               <li key={row.id}>
@@ -155,6 +162,7 @@ export default function OverviewTab({
 
         <Card
           kicker="Next best actions"
+          icon="spark"
           title="Worth doing now"
           className="todo-card"
           action={<button type="button" className="link-btn" onClick={() => onOpenTab("ops")}>Operations →</button>}

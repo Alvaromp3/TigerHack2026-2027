@@ -1,4 +1,4 @@
-import { cleanEtaSeconds, formatEta } from "./insights";
+import { cleanEtaSeconds, formatEta, turnoverPlan } from "./insights";
 import { Card, Kpi, PageHead, minutesText } from "./ui";
 
 // Where a bed in turnover is right now. Mirrors the housekeeping + linen pipeline in sim.py.
@@ -37,18 +37,20 @@ export default function OpsTab({ beds, insights, ops, incidents, busy, onOpenRoo
       />
 
       <div className="kpi-row">
-        <Kpi label="Beds in turnover" value={turnover.length} note={`${columns.waiting.length} waiting for a housekeeper`} tone={columns.waiting.length ? "warn" : undefined} />
+        <Kpi icon="broom" label="Beds in turnover" value={turnover.length} note={`${columns.waiting.length} waiting for a housekeeper`} tone={columns.waiting.length ? "warn" : undefined} />
         <Kpi
+          icon="clock"
+          loading={!insights}
           label="Average turnover"
           value={minutesText(insights?.turnover?.avg_minutes)}
           unit="min"
           note="patient leaves → bed ready"
         />
-        <Kpi label="Held beds" value={reserved.length} note="reserved for a named patient" />
-        <Kpi label="Out of service" value={down.length} note={realIncidents.length ? `${realIncidents.length} open incidents` : "no open incidents"} />
+        <Kpi icon="pause" label="Held beds" value={reserved.length} note="reserved for a named patient" />
+        <Kpi icon="wrench" label="Out of service" value={down.length} note={realIncidents.length ? `${realIncidents.length} open incidents` : "no open incidents"} />
       </div>
 
-      <section className="pipeline" data-demo="pipeline">
+      <section className="pipeline">
         {STAGES.map((stage, index) => (
           <div key={stage.id} className={`lane is-${stage.id}`}>
             <header>
@@ -62,6 +64,7 @@ export default function OpsTab({ beds, insights, ops, incidents, busy, onOpenRoo
             <ul>
               {columns[stage.id].map((room, order) => {
                 const keeper = stage.id === "waiting" ? freeKeepers[order] : null;
+                const plan = turnoverPlan(room);
                 return (
                   <li key={room.id}>
                     <button type="button" className="lane-room" onClick={() => onOpenRoom(room.id)}>
@@ -69,6 +72,8 @@ export default function OpsTab({ beds, insights, ops, incidents, busy, onOpenRoo
                       <small>{room.floorCode} · {room.deptLabel}</small>
                       {room.holdFor && <em>{room.holdFor} waiting</em>}
                     </button>
+                    <div className="lane-progress" aria-hidden="true"><i style={{ width: `${plan.pct}%` }} /></div>
+                    {plan.blocker && stage.id !== "ready" && <p className="lane-why">{plan.blocker}</p>}
                     <div className="lane-meta">
                       {stage.id === "cleaning" && <span>{room.housekeeper}</span>}
                       {stage.id === "linen" && <span>{room.linenAide || "Linen"} · {room.linenStage}</span>}
@@ -87,14 +92,19 @@ export default function OpsTab({ beds, insights, ops, incidents, busy, onOpenRoo
                   </li>
                 );
               })}
-              {columns[stage.id].length === 0 && <li className="lane-empty">Nothing here</li>}
+              {columns[stage.id].length === 0 && (
+                <li className="lane-empty">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 10.5 3.2 3L15 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  Clear
+                </li>
+              )}
             </ul>
           </div>
         ))}
       </section>
 
       <div className="flow-grid is-two">
-        <Card kicker="Out of service" title="Maintenance and incidents">
+        <Card kicker="Out of service" title="Maintenance and incidents" icon="wrench">
           <ul className="stay-list">
             {down.map((room) => {
               const incident = realIncidents.find((item) => item.room_id === room.id);
@@ -118,7 +128,7 @@ export default function OpsTab({ beds, insights, ops, incidents, busy, onOpenRoo
             {down.length === 0 && <li className="empty-note">Every bed is in service.</li>}
           </ul>
         </Card>
-        <Card kicker="Reserved" title="Beds held for a patient">
+        <Card kicker="Reserved" title="Beds held for a patient" icon="pause">
           <ul className="stay-list">
             {reserved.map((room) => (
               <li key={room.id}>

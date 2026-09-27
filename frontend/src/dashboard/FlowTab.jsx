@@ -47,11 +47,13 @@ export default function FlowTab({ insights, movements, deptLabels, now, onOpenRo
       </PageHead>
 
       <div className="kpi-row">
-        <Kpi label="Admitted" value={totals.admit} note="last 2 hours" tone="admit" />
-        <Kpi label="Discharged" value={totals.discharge} note="last 2 hours" tone="discharge" />
-        <Kpi label="Transferred out" value={totals.transfer} note="to partner hospitals" />
+        <Kpi label="Admitted" value={totals.admit} note="last 2 hours" tone="admit" icon="in" loading={!insights} />
+        <Kpi label="Discharged" value={totals.discharge} note="last 2 hours" tone="discharge" icon="out" loading={!insights} />
+        <Kpi label="Transferred out" value={totals.transfer} note="to partner hospitals" icon="transfer" loading={!insights} />
         <Kpi
           label="Bed turnover"
+          icon="clock"
+          loading={!insights}
           value={minutesText(insights?.turnover?.avg_minutes)}
           unit="min"
           note={insights?.turnover?.median_minutes != null ? `median ${minutesText(insights.turnover.median_minutes)} min` : "discharge → bed ready"}
@@ -61,15 +63,16 @@ export default function FlowTab({ insights, movements, deptLabels, now, onOpenRo
       <Card
         kicker="Every 10 minutes"
         title="Admissions vs discharges"
+        icon="bars"
         className="chart-card"
-        demo="flowchart"
+       
         action={<Legend items={[SERIES.admit, SERIES.discharge]} />}
       >
-        {insights ? <FlowChart series={insights.series} /> : <p className="empty-note">Loading the last two hours…</p>}
+        {insights ? <FlowChart series={insights.series} /> : <div className="skeleton is-chart" />}
       </Card>
 
       <div className="flow-grid">
-        <Card kicker="Length of stay" title="Average time in bed by unit">
+        <Card kicker="Length of stay" title="Average time in bed by unit" icon="clock">
           {los.length ? (
             <HBars rows={los} format={(value) => `${minutesText(value)} min`} />
           ) : (
@@ -78,7 +81,7 @@ export default function FlowTab({ insights, movements, deptLabels, now, onOpenRo
           <p className="card-foot">Simulation time: one tick is nine seconds.</p>
         </Card>
 
-        <Card kicker="Longest stays" title="Ready for a discharge review?">
+        <Card kicker="Longest stays" title="Ready for a discharge review?" icon="list">
           <ul className="stay-list">
             {(insights?.longest || []).map((row) => (
               <li key={row.room_id}>
@@ -96,7 +99,7 @@ export default function FlowTab({ insights, movements, deptLabels, now, onOpenRo
           </ul>
         </Card>
 
-        <Card kicker="Live feed" title="Latest movements">
+        <Card kicker="Live feed" title="Latest movements" icon="trend">
           <ul className="feed">
             {feed.map((event) => (
               <li key={event.id} className={`is-${FEED_KINDS[event.bucket].tone}`}>

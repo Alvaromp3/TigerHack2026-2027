@@ -48,14 +48,13 @@ function Reply({ text }) {
   );
 }
 
-export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onOpenRoom, autoAsk }) {
+export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onOpenRoom }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [offline, setOffline] = useState(false);
   const logRef = useRef(null);
-  const asked = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -74,14 +73,6 @@ export default function ChatPanel({ open, onClose, surgeOn = false, roomIds, onO
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy, error]);
-
-  useEffect(() => {
-    if (!open || !autoAsk || asked.current === autoAsk.id) return;
-    asked.current = autoAsk.id;
-    ask(autoAsk.text);
-    // ask reads the latest messages; autoAsk.id is the only trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, autoAsk]);
 
   async function ask(text) {
     const question = text.trim();

@@ -4,10 +4,11 @@ import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import ChatPanel from "./ChatPanel";
 import CommandRail from "./CommandRail";
-import DemoTour from "./DemoTour";
 import {
   NURSE_LOAD,
   buildActions,
+  formatEta,
+  turnoverPlan,
   censusRooms,
   earlyWarning,
   forecast,
@@ -661,8 +662,6 @@ export default function CommandCenter() {
     () => buildActions({ rooms: allBeds, ops, surgeOn, calledPhysicians, incidents: openIncidents }),
     [allBeds, ops, surgeOn, calledPhysicians, openIncidents],
   );
-  const [demoStep, setDemoStep] = useState(null);
-  const [chatAsk, setChatAsk] = useState(null);
   const badge = openIncidents.length;
   const mix = useMemo(() => bedMix(allBeds), [allBeds]);
   const floors = useMemo(() => floorRows(hospital), [hospital]);
@@ -1038,18 +1037,6 @@ export default function CommandCenter() {
     });
   }
 
-  function resetDemo({ silent = false } = {}) {
-    if (!silent && !window.confirm("Reset the demo? This ends the surge on the live hospital.")) {
-      return Promise.resolve(false);
-    }
-    return surgeStep("reset", async () => {
-      const data = await runAction("/api/demo/reset");
-      applyActionState(data);
-      if (data.room_id && !silent) openOpsItem({ nav: "live", room_id: data.room_id });
-      return `Demo reset. ${data.room_id} is being cleaned and Jordan Hale is waiting for it.`;
-    });
-  }
-
   function openRoomById(roomId) {
     openOpsItem({ nav: "live", room_id: roomId });
   }
@@ -1078,97 +1065,6 @@ export default function CommandCenter() {
       }
       return "Done.";
     });
-  }
-
-  const fullestFloor = [...floors].sort((a, b) => b.pct - a.pct)[0];
-  const DEMO = [
-    {
-      title: "Your hospital in five seconds",
-      say: "This is what the chief executive sees first. Occupancy, open beds, and a briefing written by AI from the live database, refreshed every hour, or on demand.",
-      cta: "Where is the pressure?",
-      focus: "briefing",
-      run: () => {},
-    },
-    {
-      title: "Every floor at a glance",
-      say: "Each bar is a floor: blue is occupied, green is open, violet is being cleaned. One click takes you to that floor's live map.",
-      cta: `Open ${fullestFloor ? fullestFloor.code : "the fullest floor"}`,
-      focus: "floors",
-      run: () => fullestFloor && goToFloor(fullestFloor.id),
-    },
-    {
-      title: "Every bed, live",
-      say: "This map is the real floor plan. Every room shows who is in it, and every bed in cleaning counts down until it reopens.",
-      cta: "Open a patient",
-      focus: "map",
-      run: () => {
-        const bed = allBeds.find((room) => room.floorId === floor.id && room.patient) || allBeds.find((room) => room.patient);
-        if (bed) openRoomById(bed.id);
-        setTab("overview");
-      },
-    },
-    {
-      title: "One click deeper",
-      say: "Patient, early-warning score from live vitals, and the care team with their real workload. The manager never has to call the floor to ask.",
-      cta: "See patient flow",
-      focus: "room",
-      run: () => chooseNav("flow"),
-    },
-    {
-      title: "Are patients moving?",
-      say: "Admissions against discharges every ten minutes. If more come in than go out, the hospital fills up. Bed turnover shows how fast a bed comes back.",
-      cta: "Check staffing",
-      focus: "flowchart",
-      run: () => chooseNav("staff"),
-    },
-    {
-      title: "Decide from the same screen",
-      say: "Patients per nurse by unit, against the target. Two levers: bring in on-call physicians, or transfer Emergency overflow to a partner hospital.",
-      cta: "Call in physicians",
-      focus: "decisions",
-      run: async () => {
-        await callPhysicians();
-        chooseNav("ops");
-      },
-    },
-    {
-      title: "What keeps beds closed",
-      say: "Every bed that is not ready yet, and exactly why: waiting for a housekeeper, being cleaned, or waiting for linen. Each one is a click away from moving.",
-      cta: "Ask the assistant",
-      focus: "pipeline",
-      run: () => {
-        setChatOpen(true);
-        setBellOpen(false);
-        setChatAsk({ id: Date.now(), text: "In two sentences: how is the hospital doing right now, and what should I do first?" });
-      },
-    },
-    {
-      title: "One screen to run the hospital.",
-      say: "Live beds, patient flow, staffing and turnover, with the decisions right next to the numbers. Built on a live database, ready for any hospital.",
-      cta: "Finish",
-      focus: "chat",
-      run: () => {
-        setChatOpen(false);
-        chooseNav("overview");
-      },
-    },
-  ];
-  const demoFocus = demoStep == null ? null : DEMO[demoStep].focus;
-
-  function startDemo() {
-    chooseNav("overview");
-    // Known starting point: nobody called in yet, one dirty bed with a patient waiting.
-    resetDemo({ silent: true });
-    setNote(null);
-    setBellOpen(false);
-    setSurgeFormOpen(false);
-    setDemoStep(0);
-  }
-
-  async function demoAction() {
-    const step = DEMO[demoStep];
-    await step.run?.();
-    setDemoStep((current) => (current == null || current >= DEMO.length - 1 ? null : current + 1));
   }
 
   useEffect(() => {
@@ -1269,7 +1165,7 @@ export default function CommandCenter() {
   }
 
   return (
-    <div className={demoFocus ? `shell demo-on demo-${demoFocus}` : demoStep != null ? "shell demo-on" : "shell"}>
+    <div className={`shell view-${nav}`}>
       <header className="appbar">
         <div className="ab-glow" aria-hidden="true" />
         <div className="ab-brand">
@@ -1295,18 +1191,6 @@ export default function CommandCenter() {
             <span>Search</span>
             <kbd>⌘K</kbd>
           </button>
-          <button
-            type="button"
-            className={demoStep != null ? "ab-demo is-on" : "ab-demo"}
-            onClick={() => (demoStep != null ? setDemoStep(null) : startDemo())}
-          >
-            {demoStep != null ? (
-              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" /></svg>
-            ) : (
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8 5 3.2Z" fill="currentColor" /></svg>
-            )}
-            {demoStep != null ? "Exit" : "Demo"}
-          </button>
           <div className="bell-wrap">
             <button
               type="button"
@@ -1330,7 +1214,6 @@ export default function CommandCenter() {
                 openRoomById(roomId);
                 setChatOpen(false);
               }}
-              autoAsk={chatAsk}
             />
           </div>
           <div className="bell-wrap">
@@ -1470,6 +1353,17 @@ export default function CommandCenter() {
               onResolve={(incident) =>
                 runRailAction({ id: `incident:${incident.id}`, roomId: incident.room_id, run: { kind: "resolve", incidentId: incident.id } })}
             />
+          )}
+          {nav !== "live" && (
+            <footer className="page-foot">
+              <span>
+                <i className={flowLive ? "" : "is-wait"} />
+                {flowLive && flowSyncedAt
+                  ? `Live census · synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
+                  : "Connecting to the live census…"}
+              </span>
+              <span>SurgeCommand · Tiger Memorial Hospital</span>
+            </footer>
           )}
           {nav === "live" && (
           <div
@@ -1698,6 +1592,7 @@ export default function CommandCenter() {
                     surgeOn={surgeOn}
                     movements={movements}
                     incidents={openIncidents.filter((item) => item.room_id === selected.id)}
+                    queuePlace={queuePlace.get(selected.id) || null}
                     onOpenRoom={openRoomById}
                     onClose={() => setSelectedId(null)}
                   />
@@ -1752,8 +1647,7 @@ export default function CommandCenter() {
                     {cleanLabel(hover.room.cleanType)}
                     {" · "}
                     {keeperLabel(hover.room, queuePlace.get(hover.room.id))}
-                    {" · "}
-                    {linenLabel(hover.room.linenStage)}
+                    {hover.room.linenStage && hover.room.linenStage !== "ready" ? ` · Linen: ${linenLabel(hover.room.linenStage)}` : ""}
                   </small>
                 )}
               </div>
@@ -1763,16 +1657,6 @@ export default function CommandCenter() {
           )}
         </main>
       </div>
-      {demoStep != null && (
-        <DemoTour
-          steps={DEMO}
-          index={demoStep}
-          busy={surgeBusy}
-          onAction={demoAction}
-          onBack={() => setDemoStep((current) => Math.max(0, (current || 0) - 1))}
-          onExit={() => setDemoStep(null)}
-        />
-      )}
     </div>
   );
 }
@@ -1882,6 +1766,7 @@ function RoomCard({
   surgeOn = false,
   movements = [],
   incidents = [],
+  queuePlace = null,
   onOpenRoom,
   onClose,
 }) {
@@ -1897,8 +1782,7 @@ function RoomCard({
   const warning = occupied ? earlyWarning(room) : null;
   const stay = occupied ? stayLabel(room.stayTicks) : null;
   const charge = lookupStaff(staff, room.charge, room.id);
-  const cleanDone = room.status === "cleaning" && room.ticksLeft === 0;
-  const linenDone = !room.linenStage || room.linenStage === "ready";
+  const turnover = room.status === "cleaning" ? turnoverPlan(room, queuePlace) : null;
 
   return (
     <div>
@@ -1962,17 +1846,12 @@ function RoomCard({
             ) : (
               <span className="rc-dx">{situation.why}</span>
             )}
-            {(occupied || (room.surge && room.census)) && (
+            {occupied && (
               <div className="rc-tags">
                 {occupied && <span className="rc-tag">{esiFor(room.status)}</span>}
                 {occupied && (
                   <span className={room.needsOr ? "rc-tag is-alert" : dispositionFor(room, surgeOn) === "Must stay" ? "rc-tag" : "rc-tag is-next"}>
                     Next · {dispositionFor(room, surgeOn)}
-                  </span>
-                )}
-                {room.surge && room.census && (
-                  <span className={surgeOn && !occupied ? "rc-tag is-alert" : "rc-tag"}>
-                    {surgeOn && !occupied ? "Held for incoming casualties" : "Surge-ready bed"}
                   </span>
                 )}
               </div>
@@ -2004,28 +1883,60 @@ function RoomCard({
             </section>
           )}
 
-          {room.status === "cleaning" && (
-            <section className="rc-section">
+          {turnover && (
+            <section className="rc-section turn">
               <header className="rc-sec-head">
                 <p className="kicker">Turnover</p>
-                <span className="rc-unit-flag">
-                  {situation.ready === "Now" ? "Ready now" : `Ready · ${situation.ready}`}
+                <span className={turnover.ready ? "rc-unit-flag" : "rc-unit-flag is-wait"}>
+                  {turnover.ready ? "Ready to open" : `Opens in ~${formatEta(turnover.eta)}`}
                 </span>
               </header>
-              <ol className="rc-steps">
-                <li className={cleanDone ? "is-done" : "is-now"}>
-                  <b>Clean · {cleanLabel(room.cleanType)}</b>
-                  <span>{room.housekeeper || (cleanDone ? "Done" : "Waiting for a housekeeper")}</span>
-                </li>
-                <li className={linenDone ? "is-done" : cleanDone ? "is-now" : ""}>
-                  <b>Linen</b>
-                  <span>{linenLabel(room.linenStage)}{room.linenAide ? ` · ${room.linenAide}` : ""}</span>
-                </li>
-                <li className={cleanDone && linenDone ? "is-now" : ""}>
-                  <b>Open bed</b>
-                  <span>{room.holdFor ? `${room.holdFor} is waiting` : "Next admit"}</span>
-                </li>
-              </ol>
+              <div className="turn-progress" role="progressbar" aria-valuenow={turnover.pct} aria-valuemin={0} aria-valuemax={100}>
+                <i style={{ width: `${turnover.pct}%` }} />
+                <b>{turnover.pct}%</b>
+              </div>
+              {turnover.blocker && (
+                <p className="turn-blocker"><span>Holding it up</span>{turnover.blocker}</p>
+              )}
+              <div className="turn-tracks">
+                <div className={`turn-track is-${turnover.clean.state}`}>
+                  <span className="turn-dot" aria-hidden="true" />
+                  <div>
+                    <strong>Clean · {cleanLabel(turnover.clean.type)}</strong>
+                    <small>
+                      {turnover.clean.state === "done"
+                        ? "Finished"
+                        : turnover.clean.who
+                          ? `${turnover.clean.who} · ~${formatEta(turnover.clean.eta)} left`
+                          : "Waiting for a housekeeper"}
+                    </small>
+                  </div>
+                </div>
+                <div className={`turn-track is-${turnover.linen.state}`}>
+                  <span className="turn-dot" aria-hidden="true" />
+                  <div>
+                    <strong>Fresh linen</strong>
+                    <small>
+                      {turnover.linen.state === "done"
+                        ? "Clean sheets are in the room"
+                        : turnover.linen.who
+                          ? `${turnover.linen.who} · ~${formatEta(turnover.linen.eta)} left`
+                          : "Waiting for a linen aide"}
+                    </small>
+                    <ol className="turn-stages">
+                      {turnover.linen.stages.map((stage) => (
+                        <li key={stage.id} className={`is-${stage.state}`}>{stage.label}</li>
+                      ))}
+                    </ol>
+                  </div>
+                </div>
+              </div>
+              <p className="turn-next">
+                {turnover.ready
+                  ? "Both crews are done. "
+                  : "Both crews work at the same time; the bed opens when the slower one finishes. "}
+                {turnover.nextFor ? <b>{turnover.nextFor} gets this bed next.</b> : "It goes to the next admission."}
+              </p>
             </section>
           )}
 

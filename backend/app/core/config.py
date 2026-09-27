@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     auth0_client_secret: str = ""
     database_url: str = "postgresql+psycopg://tigerhack:tigerhack@localhost:5433/tigerhack"
     google_api_key: str = ""
-    google_model: str = "gemini-2.5-flash"
+    google_model: str = "gemini-3.8-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -62,13 +62,13 @@ export default function StaffTab({ ops, roster, calledPhysicians, divertedCount,
       />
 
       <div className="kpi-row">
-        <Kpi label="On duty" value={onDuty.length} note={`${nurses.length} nurses · ${onDuty.length - nurses.length} other staff`} />
-        <Kpi label="Nurses over target" value={overloaded.length} note={overloaded.length ? "need support" : "everyone within target"} tone={overloaded.length ? "warn" : undefined} />
-        <Kpi label="Housekeepers free" value={`${freeKeepers.length}/${keepers.length}`} note="ready to take a clean" />
-        <Kpi label="Physicians called in" value={calledPhysicians} note={divertedCount ? `${divertedCount} patients transferred out` : "no transfers out"} />
+        <Kpi icon="users" label="On duty" value={onDuty.length} note={`${nurses.length} nurses · ${onDuty.length - nurses.length} other staff`} />
+        <Kpi icon="alert" label="Nurses over target" value={overloaded.length} note={overloaded.length ? "need support" : "everyone within target"} tone={overloaded.length ? "warn" : undefined} />
+        <Kpi icon="broom" label="Housekeepers free" value={`${freeKeepers.length}/${keepers.length}`} note="ready to take a clean" />
+        <Kpi icon="phone" label="Physicians called in" value={calledPhysicians} note={divertedCount ? `${divertedCount} patients transferred out` : "no transfers out"} />
       </div>
 
-      <section className="decisions" data-demo="decisions">
+      <section className="decisions">
         <header>
           <p className="card-kicker">Decisions</p>
           <h2>Two levers, one click each</h2>
@@ -122,7 +122,7 @@ export default function StaffTab({ ops, roster, calledPhysicians, divertedCount,
 
       <div className="staff-grid">
         {[...byUnit.entries()].map(([unit, people]) => (
-          <Card key={unit} kicker={unitLabel[unit] || unit.toUpperCase()} title={`${people.filter((person) => person.on_duty).length} on duty`}>
+          <Card key={unit} icon="users" kicker={unitLabel[unit] || unit.toUpperCase()} title={`${people.filter((person) => person.on_duty).length} on duty`}>
             <ul className="people">
               {people.map((person) => {
                 const load = (person.patients || []).length;
@@ -144,7 +144,7 @@ export default function StaffTab({ ops, roster, calledPhysicians, divertedCount,
             </ul>
           </Card>
         ))}
-        <Card kicker="Environmental services" title="Housekeeping crew">
+        <Card kicker="Environmental services" title="Housekeeping crew" icon="broom">
           <ul className="people">
             {keepers.map((keeper) => (
               <li key={keeper.id}>
