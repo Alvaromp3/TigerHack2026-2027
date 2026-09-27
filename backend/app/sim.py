@@ -45,6 +45,9 @@ ISOLATION_MARKERS = ("sepsis", "c. diff", "c.diff", "covid", "mrsa", "tb", "tube
 
 
 def tick(db: Session):
+    # Take a pooled connection before the write lock. Waiting on the pool
+    # while holding the lock stalls every other writer.
+    db.connection()
     with write_lock:
         state = db.get(HospitalState, 1)
         if state is not None:

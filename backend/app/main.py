@@ -13,17 +13,25 @@ from app.sim import TICK_SECONDS, tick, tick_seconds
 log = logging.getLogger(__name__)
 
 
+def _read_tick_seconds():
+    with SessionLocal() as db:
+        return tick_seconds(db)
+
+
+def _run_tick():
+    with SessionLocal() as db:
+        tick(db)
+
+
 async def _census_loop():
     while True:
         try:
-            with SessionLocal() as db:
-                delay = tick_seconds(db)
+            delay = await asyncio.to_thread(_read_tick_seconds)
         except Exception:
             delay = TICK_SECONDS
         await asyncio.sleep(delay)
         try:
-            with SessionLocal() as db:
-                tick(db)
+            await asyncio.to_thread(_run_tick)
         except Exception:
             log.exception("census tick failed")
 

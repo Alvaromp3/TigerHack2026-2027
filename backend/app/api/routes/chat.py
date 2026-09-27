@@ -43,6 +43,8 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Send a question.")
 
     snapshot = build_ops(db)
+    db.commit()
+    db.close()
     brief = {
         "surge": snapshot["surge"],
         "incoming_notice": snapshot.get("incoming_notice"),

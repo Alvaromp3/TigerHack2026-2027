@@ -6,7 +6,20 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_recycle=280,
+    pool_timeout=10,
+    connect_args={
+        # Fail a blocked query instead of pinning a pooled connection for 30s.
+        "options": (
+            "-c lock_timeout=4000 "
+            "-c statement_timeout=20000 "
+            "-c idle_in_transaction_session_timeout=20000"
+        ),
+    },
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 # One session lock so overlapping deploys don't ALTER the same tables together.
@@ -49,6 +62,10 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        if db.in_transaction():
+            db.rollback()
+        raise
     finally:
         db.close()
 
