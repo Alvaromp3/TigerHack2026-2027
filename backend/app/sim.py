@@ -93,12 +93,19 @@ def declare_surge(db: Session) -> int:
 
 ADMIT_SITES = (("F1", "ED"), ("F1", "FAST"), ("F1", "OBS"), ("F3", "ER"))
 WEIGHTS = {"admit": 30, "transfer": 25, "or": 15, "discharge": 25, "divert": 10, "death": 8}
+# One tick is 9 seconds. A patient stays put until that stretch is finished.
+STAY_BOARD = 12
+STAY_BEFORE_OR = 16
+STAY_IN_OR = 40
+STAY_RECOVER = 30
+STAY_ICU = 24
+STAY_OBS = 20
 
 
 def _advance_stay(db: Session):
     for patient in db.scalars(select(Patient)).all():
         patient.stay_ticks = (patient.stay_ticks or 0) + 1
-        if patient.acuity != "warning" or patient.stay_ticks < 2:
+        if patient.acuity != "warning" or patient.stay_ticks < STAY_BOARD:
             continue
         patient.acuity = "normal"
         room = patient.room
@@ -166,16 +173,16 @@ def _med_beds(db: Session):
 
 def _boarding_critical(db: Session):
     people = [
-        person for person in _people(db, floor_id="F1", acuity="critical", min_stay=1)
+        person for person in _people(db, floor_id="F1", acuity="critical", min_stay=STAY_BOARD)
         if person.room and person.room.id.startswith(("ED", "FAST", "OBS"))
     ]
-    people.extend(_people(db, floor_id="F3", prefix="ER", acuity="critical", min_stay=1))
+    people.extend(_people(db, floor_id="F3", prefix="ER", acuity="critical", min_stay=STAY_BOARD))
     return people
 
 
 def _boarding_stable(db: Session):
     return [
-        person for person in _people(db, floor_id="F1", stable=True, min_stay=1)
+        person for person in _people(db, floor_id="F1", stable=True, min_stay=STAY_BOARD)
         if person.room and person.room.id.startswith(("ED", "FAST"))
     ]
 
@@ -186,11 +193,8 @@ def _transfer_moves(db: Session):
         moves.extend(("icu", person) for person in _boarding_critical(db))
     if _med_beds(db):
         moves.extend(("floor", person) for person in _boarding_stable(db))
-        for person in _people(db, floor_id="F3", dept="icu", min_stay=1):
-            stayed = person.stay_ticks or 0
+        for person in _people(db, floor_id="F3", dept="icu", min_stay=STAY_ICU):
             if person.acuity in ("normal", "warning"):
-                moves.append(("stepdown", person))
-            elif person.acuity == "critical" and stayed >= 4:
                 moves.append(("stepdown", person))
     return moves
 
@@ -214,8 +218,8 @@ def _transfer_one(db: Session):
 
 
 def _surgical_waiting(db: Session):
-    waiting = list(_people(db, floor_id="F2", dept="med", needs_or=True, min_stay=1))
-    waiting.extend(_people(db, floor_id="F3", dept="med", prefix="MS", needs_or=True, min_stay=1))
+    waiting = list(_people(db, floor_id="F2", dept="med", needs_or=True, min_stay=STAY_BEFORE_OR))
+    waiting.extend(_people(db, floor_id="F3", dept="med", prefix="MS", needs_or=True, min_stay=STAY_BEFORE_OR))
     return waiting
 
 
@@ -224,7 +228,7 @@ def _or_moves(db: Session):
     if _beds(db, kind="or"):
         moves.extend(("in", person) for person in _surgical_waiting(db))
     if _beds(db, floor_id="F4", dept="surgward"):
-        moves.extend(("out", person) for person in _people(db, kind="or", min_stay=1))
+        moves.extend(("out", person) for person in _people(db, kind="or", min_stay=STAY_IN_OR))
     return moves
 
 
@@ -241,17 +245,22 @@ def _or_one(db: Session):
     beds = _beds(db, floor_id="F4", dept="surgward")
     if not beds:
         return None
-    person.needs_or = False
-    person.acuity = "normal"
     dest = random.choice(beds)
-    return _move(db, person, dest, f"{person.name} left the OR for {dest.id}")
+    return _move(
+        db,
+        person,
+        dest,
+        f"{person.name} left the OR for {dest.id}",
+        expect_kind="or",
+        settle="normal",
+    )
 
 
 def _discharge_people(db: Session):
-    people = list(_people(db, floor_id="F2", dept="med", acuity="normal", needs_or=False, min_stay=3))
-    people.extend(_people(db, floor_id="F3", dept="med", prefix="MS", acuity="normal", needs_or=False, min_stay=3))
-    people.extend(_people(db, floor_id="F4", dept="surgward", acuity="normal", needs_or=False, min_stay=3))
-    people.extend(_people(db, floor_id="F1", prefix="OBS", acuity="normal", needs_or=False, min_stay=3))
+    people = list(_people(db, floor_id="F2", dept="med", acuity="normal", needs_or=False, min_stay=STAY_RECOVER))
+    people.extend(_people(db, floor_id="F3", dept="med", prefix="MS", acuity="normal", needs_or=False, min_stay=STAY_RECOVER))
+    people.extend(_people(db, floor_id="F4", dept="surgward", acuity="normal", needs_or=False, min_stay=STAY_RECOVER))
+    people.extend(_people(db, floor_id="F1", prefix="OBS", acuity="normal", needs_or=False, min_stay=STAY_OBS))
     return people
 
 
@@ -280,7 +289,7 @@ def _divert_one(db: Session):
 
 
 def _death_people(db: Session):
-    return _people(db, acuity="critical", min_stay=2, kind=None)
+    return _people(db, floor_id="F3", dept="icu", acuity="critical", min_stay=STAY_ICU)
 
 
 def _death_one(db: Session):
@@ -328,25 +337,28 @@ def _shift(db: Session, people, beds, label: str):
     dest = random.choice(beds)
     if label == "OR":
         message = f"{patient.name} in {dest.id}"
+        expect_kind = "bed"
     else:
         message = f"{patient.name} moved to {label} {dest.id}"
-    if dest.dept == "surgward" and patient.room.kind == "or":
-        patient.needs_or = False
-        patient.acuity = "normal"
-        message = f"{patient.name} left the OR for {dest.id}"
-    return _move(db, patient, dest, message)
+        expect_kind = None
+    return _move(db, patient, dest, message, expect_kind=expect_kind)
 
 
 def _leave_or(db: Session):
-    people = _people(db, kind="or")
+    people = _people(db, kind="or", min_stay=STAY_IN_OR)
     beds = _beds(db, floor_id="F4", dept="surgward")
     if not people or not beds:
         return None
     patient = random.choice(people)
     dest = random.choice(beds)
-    patient.needs_or = False
-    patient.acuity = "normal"
-    return _move(db, patient, dest, f"{patient.name} left the OR for {dest.id}")
+    return _move(
+        db,
+        patient,
+        dest,
+        f"{patient.name} left the OR for {dest.id}",
+        expect_kind="or",
+        settle="normal",
+    )
 
 
 def _discharge_pool(db: Session, floor_id: str, dept=None, prefix=None):
@@ -362,8 +374,22 @@ def _discharge(db: Session, floor_id: str, dept=None, prefix=None):
     return _discharge_patient(db, random.choice(people))
 
 
+def _claim(db: Session, patient: Patient) -> Patient | None:
+    """Lock one patient so two ticks cannot move them twice."""
+    if patient is None or patient.id is None:
+        return None
+    return db.scalar(
+        select(Patient).where(Patient.id == patient.id).with_for_update(skip_locked=True)
+    )
+
+
 def _discharge_patient(db: Session, patient: Patient):
-    room = patient.room
+    patient = _claim(db, patient)
+    if patient is None:
+        return None
+    room = db.get(Room, patient.room_id)
+    if room is None or room.kind == "or":
+        return None
     name = patient.name
     room_id = room.id
     clinical = _clinical_text(patient)
@@ -392,7 +418,12 @@ def _divert_or(db: Session):
 
 
 def _die(db: Session, patient: Patient):
-    room = patient.room
+    patient = _claim(db, patient)
+    if patient is None:
+        return None
+    room = db.get(Room, patient.room_id)
+    if room is None or room.dept != "icu":
+        return None
     name = patient.name
     room_id = room.id
     clinical = _clinical_text(patient)
@@ -652,8 +683,25 @@ def _beds(db: Session, floor_id=None, dept=None, prefix=None, kind="bed"):
     return rows
 
 
-def _move(db: Session, patient: Patient, dest: Room, message: str):
-    origin = patient.room
+def _move(db: Session, patient: Patient, dest: Room, message: str, expect_kind: str | None = None, settle: str | None = None):
+    patient = _claim(db, patient)
+    if patient is None:
+        return None
+    origin = db.get(Room, patient.room_id)
+    if origin is None or origin.id == dest.id:
+        return None
+    if expect_kind and origin.kind != expect_kind:
+        return None
+    if (patient.stay_ticks or 0) < 1:
+        return None
+    dest = db.scalar(
+        select(Room).where(Room.id == dest.id, Room.status == "available").with_for_update(skip_locked=True)
+    )
+    if dest is None or db.scalar(select(Patient.id).where(Patient.room_id == dest.id)):
+        return None
+    if settle:
+        patient.acuity = settle
+        patient.needs_or = False
     clinical = _clinical_text(patient)
     origin.status = "cleaning"
     patient.room = dest
@@ -667,14 +715,20 @@ def _move(db: Session, patient: Patient, dest: Room, message: str):
     _clear_clean(dest)
     db.flush()
     _stamp_clean(db, origin, clinical)
-    _log(db, patient.name, message, dest.id, "move")
+    kind = "or" if dest.kind == "or" or origin.kind == "or" else "move"
+    _log(db, patient.name, message, dest.id, kind)
     return message
 
 
 def _transfer(db: Session, patient: Patient, reason: str):
+    patient = _claim(db, patient)
+    if patient is None:
+        return None
+    room = db.get(Room, patient.room_id)
+    if room is None or room.kind == "or":
+        return None
     destination = DESTINATIONS[reason]
     name = patient.name
-    room = patient.room
     clinical = _clinical_text(patient)
     db.delete(patient)
     db.add(Transfer(patient_name=name, destination=destination, reason=reason))
