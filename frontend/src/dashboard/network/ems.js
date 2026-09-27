@@ -22,6 +22,27 @@ export const ZONES = ["Downtown", "North", "East", "South", "West"];
 
 export const UNIT_ORDER = ["ed", "icu", "inpatient", "or"];
 
+const LEVEL_RANK = { full: 0, limited: 1, none: 2, open: 3 };
+
+// The unit under the most pressure. A tie goes to the higher occupancy.
+export function tightestUnit(units) {
+  if (!units) return null;
+  const rows = UNIT_ORDER.map((key) => units[key]).filter(Boolean);
+  if (!rows.length) return null;
+  return [...rows].sort((a, b) => {
+    const rank = (LEVEL_RANK[a.level] ?? 9) - (LEVEL_RANK[b.level] ?? 9);
+    if (rank) return rank;
+    return b.occupancy_pct - a.occupancy_pct;
+  })[0];
+}
+
+// A unit that can block the next ambulance, while the hospital is still accepting.
+export function blockingUnit(units) {
+  const tight = tightestUnit(units);
+  if (!tight || (tight.level !== "full" && tight.level !== "limited")) return null;
+  return tight;
+}
+
 export function countdown(seconds) {
   if (seconds == null) return "—";
   const safe = Math.max(0, Math.round(seconds));

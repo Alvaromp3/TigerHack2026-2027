@@ -653,6 +653,7 @@ export default function CommandCenter() {
   const [emsRuns, setEmsRuns] = useState([]);
   const [emsSummary, setEmsSummary] = useState(null);
   const [emsStatus, setEmsStatus] = useState({ ems_status: "accepting", reason: null });
+  const [focusRunId, setFocusRunId] = useState(null);
   const [region, setRegion] = useState([]);
   const [statusOpen, setStatusOpen] = useState(false);
   const [statusReason, setStatusReason] = useState("");
@@ -674,9 +675,6 @@ export default function CommandCenter() {
     () => allBeds.filter((room) => (room.dept === "ed" || room.dept === "trauma") && room.patient).length,
     [allBeds],
   );
-  let briefingText = "- Connecting to the live census.";
-  if (briefing.source === "ai" && briefing.text) briefingText = briefing.text;
-  else if (mix.total) briefingText = localBriefing({ mix, floors, totals: insights?.totals, turnover: insights?.turnover, actions });
   const incoming = useMemo(
     () => emsRuns.filter((run) => run.destination === "Tiger Memorial" && ["pending", "accepted", "arrived"].includes(run.status)),
     [emsRuns],
@@ -694,6 +692,16 @@ export default function CommandCenter() {
   }, [incoming, syncTick]);
   const emsBayActive = incoming.some((run) => run.status === "arrived");
   const homeCapacity = region.find((row) => row.name === "Tiger Memorial") || null;
+  let briefingText = "- Connecting to the live census.";
+  if (briefing.source === "ai" && briefing.text) briefingText = briefing.text;
+  else {
+    briefingText = localBriefing({
+      emsStatus,
+      capacity: homeCapacity,
+      incoming,
+      totals: insights?.totals,
+    });
+  }
   const opsBadge = allBeds.filter((room) => room.status === "cleaning" && !room.housekeeper && room.ticksLeft !== 0).length;
   const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
   const queuePlace = useMemo(() => {
@@ -1465,25 +1473,18 @@ export default function CommandCenter() {
           {nav === "overview" && (
             <OverviewTab
               now={now}
-              mix={mix}
-              floors={floors}
               outlook={outlook}
               insights={insights}
               briefing={{ ...briefing, text: briefingText }}
-              actions={actions}
-              busy={surgeBusy}
               onRefreshBriefing={refreshBriefing}
               capacity={homeCapacity}
               incoming={incoming}
-              emsSummary={emsSummary}
               emsStatus={emsStatus}
-              calledPhysicians={calledPhysicians}
-              onCallPhysicians={callPhysicians}
               onOpenAmbulances={() => chooseNav("ambulances")}
-              onOpenFloor={goToFloor}
-              onOpenRoom={openRoomById}
-              onRunAction={runRailAction}
-              onOpenTab={chooseNav}
+              onOpenRun={(run) => {
+                setFocusRunId(run.id);
+                chooseNav("ambulances");
+              }}
             />
           )}
           {nav === "ambulances" && (
@@ -1493,6 +1494,7 @@ export default function CommandCenter() {
               beds={allBeds}
               hospitals={region}
               busy={surgeBusy}
+              focusId={focusRunId}
               onAccept={acceptRun}
               onDivert={divertRun}
               onHandoff={handoffRun}

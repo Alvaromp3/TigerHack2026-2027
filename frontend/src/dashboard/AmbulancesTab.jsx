@@ -47,7 +47,7 @@ function Timeline({ run }) {
   );
 }
 
-export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, onAccept, onDivert, onHandoff, onOpenRoom }) {
+export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, focusId, onAccept, onDivert, onHandoff, onOpenRoom }) {
   const now = useNow();
   const [selectedId, setSelectedId] = useState(null);
   const [bedChoice, setBedChoice] = useState("");
@@ -64,6 +64,10 @@ export default function AmbulancesTab({ runs, summary, beds, hospitals, busy, on
     [beds],
   );
   const partners = hospitals.filter((row) => row.name !== "Tiger Memorial");
+
+  useEffect(() => {
+    if (focusId != null) setSelectedId(focusId);
+  }, [focusId]);
 
   useEffect(() => {
     setBedChoice(selected?.bed_id || "");

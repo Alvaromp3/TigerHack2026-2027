@@ -1,5 +1,4 @@
-import { BED_MIX, Legend, MixBar, SERIES } from "./charts";
-import { ESI, UNIT_ORDER, countdown } from "./network/ems";
+import { ESI, UNIT_ORDER, blockingUnit, countdown, tightestUnit } from "./network/ems";
 import { Card, Kpi, PageHead } from "./ui";
 
 function greeting(now) {
@@ -26,44 +25,66 @@ function BriefingLines({ text }) {
   );
 }
 
+function dueSoon(incoming) {
+  return incoming.filter((run) => run.status === "arrived" || (run.eta_seconds ?? 9999) <= 900);
+}
+
+function arrivalRank(run) {
+  if (run.status === "pending") return 0;
+  if (run.status === "arrived") return 1;
+  return 2;
+}
+
+function netLabel(totals) {
+  if (!totals) return null;
+  const net = totals.admit - totals.discharge - totals.transfer;
+  if (net > 0) return `+${net} net · filling over 2 h`;
+  if (net < 0) return `${net} net · emptying over 2 h`;
+  return "balanced over 2 h";
+}
+
 export default function OverviewTab({
   now,
-  mix,
-  floors,
   outlook,
   insights,
   briefing,
-  actions,
-  busy,
   onRefreshBriefing,
-  onOpenFloor,
-  onOpenRoom,
-  onRunAction,
-  onOpenTab,
   capacity,
   incoming = [],
-  emsSummary,
   emsStatus,
-  calledPhysicians = 0,
-  onCallPhysicians,
   onOpenAmbulances,
+  onOpenRun,
 }) {
   const totals = insights?.totals;
-  const series = insights?.series || [];
-  const admits = series.map((slot) => slot.admit);
-  const discharges = series.map((slot) => slot.discharge);
-  const soon = incoming.filter((run) => run.status === "arrived" || (run.eta_seconds ?? 9999) <= 900);
+  const units = capacity?.units;
+  const tight = tightestUnit(units);
+  const blocker = blockingUnit(units);
+  const pending = incoming.filter((run) => run.status === "pending");
+  const soon = dueSoon(incoming).sort(
+    (a, b) => arrivalRank(a) - arrivalRank(b) || (a.eta_seconds ?? 0) - (b.eta_seconds ?? 0),
+  );
   const diverting = emsStatus?.ems_status === "diverting";
-  const net = totals ? totals.admit - totals.discharge - totals.transfer : null;
+  const flow = netLabel(totals);
   const dateLabel = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const edOpen = units?.ed?.open;
 
   return (
     <div className="page">
       <PageHead
         kicker={dateLabel}
-        title={`${greeting(now)}. Here is Tiger Memorial.`}
-        sub="Live capacity in every unit, the ambulances on their way, and the decisions that keep the doors open."
-      />
+        title={`${greeting(now)}. Can we take the next ambulance?`}
+        sub="Live capacity in every unit, who is due in 15 minutes, and the one decision that keeps the doors honest."
+      >
+        <div className={diverting ? "ov-head-status is-diverting" : "ov-head-status"}>
+          <i />
+          <strong>{diverting ? "On diversion" : "Accepting ambulances"}</strong>
+          <small>
+            {diverting
+              ? emsStatus?.reason || "At capacity"
+              : "What every ambulance company sees"}
+          </small>
+        </div>
+      </PageHead>
 
       <div className="ov-hero">
         <section className="brief">
@@ -92,166 +113,104 @@ export default function OverviewTab({
         </section>
 
         <section className="capacity">
-          <p className="card-kicker">Hospital capacity</p>
-          <div className="cap-top">
-            <div className="cap-big">
-              <strong>{mix.pct}<small>%</small></strong>
-              <span>occupied · {mix.occupied} of {mix.total} beds</span>
-            </div>
-            <div className="cap-forecast">
-              <span>Open beds</span>
-              <b>{outlook.now}<em>→</em>{outlook.soon}</b>
-              <small>now → next {outlook.horizon} min</small>
-            </div>
-          </div>
-          {capacity ? (
+          <p className="card-kicker">Unit capacity</p>
+          {units ? (
             <ul className="unit-cap">
               {UNIT_ORDER.map((key) => {
-                const unit = capacity.units[key];
+                const unit = units[key];
+                if (!unit) return null;
                 return (
                   <li key={key} className={`is-${unit.level}`}>
                     <span>{unit.label}</span>
                     <div className="hunit-bar"><i style={{ width: `${unit.occupancy_pct}%` }} /></div>
                     <b>{unit.occupancy_pct}%</b>
-                    <small>{unit.open} open</small>
+                    <small>
+                      {unit.open} open
+                      {key === "ed" && capacity.ed_wait_min != null ? ` · ~${capacity.ed_wait_min} min wait` : ""}
+                    </small>
                   </li>
                 );
               })}
             </ul>
           ) : (
-            <>
-              <MixBar mix={mix} total={mix.total} height={14} />
-              <Legend items={BED_MIX.map((item) => ({ ...item, value: mix[item.id] }))} />
-            </>
+            <p className="empty-note">Reading live capacity…</p>
           )}
+          <p className="cap-foot">
+            <span>Open beds {outlook.now} → {outlook.soon} · next {outlook.horizon} min</span>
+            {flow && <span>{flow}</span>}
+          </p>
         </section>
       </div>
 
       <div className="kpi-row">
         <Kpi
-          label="Ambulances en route"
+          label="Unanswered pre-alerts"
+          icon="alert"
+          value={pending.length}
+          note={pending.length ? "waiting for an answer" : "every pre-alert answered"}
+          tone={pending.length ? "warn" : undefined}
+        />
+        <Kpi
+          label="Due in 15 min"
           icon="transfer"
-          loading={!emsSummary}
-          value={emsSummary?.en_route ?? "—"}
-          note={emsSummary?.pending ? `${emsSummary.pending} waiting for an answer` : "all pre-alerts answered"}
-          tone={emsSummary?.pending ? "warn" : undefined}
+          value={soon.length}
+          note={soon.some((run) => run.status === "arrived") ? "includes the EMS bay" : "on the way to this door"}
         />
         <Kpi
-          label="Admitted · 2 h"
-          icon="in"
-          loading={!insights}
-          value={totals ? totals.admit : "—"}
-          note={net == null ? "" : net > 0 ? `+${net} net · filling` : net < 0 ? `${net} net · emptying` : "balanced"}
-          spark={admits}
-          sparkColor={SERIES.admit.color}
+          label="ED beds open"
+          icon="bed"
+          loading={!units}
+          value={edOpen ?? "—"}
+          note="held beds are not counted"
         />
         <Kpi
-          label="Discharged · 2 h"
-          icon="out"
-          loading={!insights}
-          value={totals ? totals.discharge : "—"}
-          note={totals?.transfer ? `${totals.transfer} transferred out` : "no transfers out"}
-          spark={discharges}
-          sparkColor={SERIES.discharge.color}
-        />
-        <Kpi
-          label="Avg offload time"
-          icon="clock"
-          loading={!emsSummary}
-          value={emsSummary?.offload_avg_seconds != null ? `${Math.floor(emsSummary.offload_avg_seconds / 60)}:${String(emsSummary.offload_avg_seconds % 60).padStart(2, "0")}` : "—"}
-          note={`${emsSummary?.arrivals_24h ?? 0} arrivals · ${emsSummary?.diverted_24h ?? 0} diverted today`}
+          label="Tightest unit"
+          icon="bars"
+          loading={!tight}
+          value={tight ? tight.label : "—"}
+          note={tight ? `${tight.open} open · ${tight.occupancy_pct}%` : ""}
+          tone={tight && (tight.level === "full" || tight.level === "limited") ? "warn" : undefined}
         />
       </div>
 
-      <div className="ov-ems">
-        <Card
-          kicker="Next 15 minutes"
-          title={soon.length ? `${soon.length} ambulances arriving` : "No ambulance due"}
-          icon="transfer"
-          action={<button type="button" className="link-btn" onClick={onOpenAmbulances}>Ambulances →</button>}
-        >
-          <ul className="arrivals">
-            {soon.map((run) => (
-              <li key={run.id} style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}>
-                <span className="esi-badge">ESI {run.esi}</span>
+      <Card
+        kicker="Next 15 minutes"
+        title={soon.length === 1 ? "1 ambulance arriving" : soon.length ? `${soon.length} ambulances arriving` : "No ambulance due"}
+        icon="transfer"
+        action={<button type="button" className="link-btn" onClick={onOpenAmbulances}>Ambulances →</button>}
+      >
+        <ul className="arrivals">
+          {soon.map((run) => (
+            <li
+              key={run.id}
+              className={run.status === "pending" ? "is-pending" : ""}
+              style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}
+            >
+              <span className="esi-badge">ESI {run.esi}</span>
+              <span className="arr-main">
                 <strong>{run.complaint_label}</strong>
                 <small>{run.unit}</small>
-                <em>{run.status === "pending" ? "needs an answer" : run.bed_id ? `→ ${run.bed_id}` : "no bed yet"}</em>
-                <b>{run.status === "arrived" ? "at bay" : countdown(run.eta_seconds)}</b>
-              </li>
-            ))}
-            {!soon.length && <li className="empty-note">Pre-alerts from ambulance crews appear here as soon as they are sent.</li>}
-          </ul>
-        </Card>
-        <Card kicker="Decisions" title="Keep the doors open" icon="phone" className="ov-decide">
-          <div className={diverting ? "ov-status is-diverting" : "ov-status"}>
-            <i />
-            <div>
-              <strong>{diverting ? "On ambulance diversion" : "Accepting ambulances"}</strong>
-              <small>{diverting ? emsStatus?.reason || "At capacity" : "Visible to every ambulance company in the region"}</small>
-            </div>
-          </div>
-          <button type="button" className="dark-btn ov-call" disabled={Boolean(busy) || calledPhysicians > 0} onClick={onCallPhysicians}>
-            {calledPhysicians ? `✓ ${calledPhysicians} on-call physicians on duty` : busy === "call" ? "Calling…" : "Call in on-call physicians"}
-          </button>
-        </Card>
-      </div>
+              </span>
+              <span className="arr-needs">{(run.needs || []).join(" · ") || "ED bed"}</span>
+              <em className="arr-bed">{run.bed_id ? run.bed_id : "no bed"}</em>
+              <b className="arr-when">{run.status === "arrived" ? "at bay" : countdown(run.eta_seconds)}</b>
+              {run.status === "pending" ? (
+                <button type="button" className="dark-btn" onClick={() => onOpenRun(run)}>Answer</button>
+              ) : (
+                <span className="arr-gap" />
+              )}
+            </li>
+          ))}
+          {!soon.length && <li className="empty-note">Pre-alerts from ambulance crews appear here as soon as they are sent.</li>}
+        </ul>
+      </Card>
 
-      <div className="ov-grid">
-        <Card kicker="Floors" title="Where the beds are" icon="layers" className="floors-card">
-          <ul className="floor-list">
-            {floors.map((row) => (
-              <li key={row.id}>
-                <button type="button" onClick={() => onOpenFloor(row.id)}>
-                  <span className="fl-code">{row.code}</span>
-                  <span className="fl-name">
-                    <strong>{row.name}</strong>
-                    <small>{row.open} open · {row.turnover} in turnover</small>
-                  </span>
-                  <span className="fl-bar"><MixBar mix={row} total={row.total} height={10} /></span>
-                  <span className={row.pct >= 90 ? "fl-pct is-high" : "fl-pct"}>{row.pct}%</span>
-                  <svg className="fl-go" viewBox="0 0 12 12" aria-hidden="true">
-                    <path d="m4.5 2.5 3.5 3.5-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card
-          kicker="Next best actions"
-          icon="spark"
-          title="Worth doing now"
-          className="todo-card"
-          action={<button type="button" className="link-btn" onClick={() => onOpenTab("ops")}>Operations →</button>}
-        >
-          {actions.length === 0 ? (
-            <p className="empty-note">Nothing is blocking flow. New suggestions appear here the moment a bed or a team needs attention.</p>
-          ) : (
-            <ol className="todo">
-              {actions.slice(0, 3).map((item, index) => (
-                <li key={item.id} className={`is-${item.tone}`}>
-                  <span className="todo-rank">{index + 1}</span>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <span>{item.detail}</span>
-                    <div className="todo-foot">
-                      <em>{item.gain}</em>
-                      {item.roomId && <button type="button" className="ghost-btn" onClick={() => onOpenRoom(item.roomId)}>View</button>}
-                      {item.run && (
-                        <button type="button" className="dark-btn" disabled={Boolean(busy)} onClick={() => onRunAction(item)}>
-                          {busy === item.id ? "Working…" : item.run.label}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Card>
-      </div>
+      {!diverting && blocker && (
+        <p className="ov-block">
+          {blocker.label} is {blocker.level === "full" ? "full" : "limited"} · {blocker.open} open.
+          Ambulance companies still see Tiger Memorial as accepting. Diversion is in the bar above.
+        </p>
+      )}
     </div>
   );
 }

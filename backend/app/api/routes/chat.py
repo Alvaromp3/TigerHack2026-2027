@@ -33,11 +33,11 @@ Keep the answer under 90 words. Use short bullet points when listing more than t
 
 
 BRIEFING = """You write the operations briefing for the chief executive of Tiger Memorial Hospital.
-Use only the operations snapshot and the flow trends in this prompt. Do not invent numbers.
+Use only the operations snapshot in this prompt. Do not invent numbers.
 Write exactly three bullet lines, each under 22 words, each starting with "- ".
-Line 1: capacity (occupancy, open beds, the fullest unit).
-Line 2: patient flow (admissions versus discharges, bed turnover).
-Line 3: the one decision worth making now, or say no action is needed.
+Line 1: whether the hospital is accepting ambulances or on diversion, and the tightest unit with its open beds.
+Line 2: ambulances due in the next 15 minutes and how many pre-alerts are still unanswered.
+Line 3: the one decision worth making now (answer a pre-alert, or diversion if a needed unit is full), or say no action is needed.
 Calm, factual, management tone. No alarm words. Write room and unit names exactly as given."""
 
 _briefing_cache: dict = {"at": 0.0, "text": None}

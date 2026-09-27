@@ -1,4 +1,5 @@
 import { Sparkline } from "./charts";
+import { blockingUnit, tightestUnit } from "./network/ems";
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
 
@@ -31,21 +32,52 @@ export function minutesText(value) {
   return value < 10 ? value.toFixed(1) : String(Math.round(value));
 }
 
+function dueSoon(incoming) {
+  return incoming.filter((run) => run.status === "arrived" || (run.eta_seconds ?? 9999) <= 900);
+}
+
 // Plain-language fallback so the home screen always has a briefing, even with the AI offline.
-export function localBriefing({ mix, floors, totals, turnover, actions }) {
-  const fullest = [...floors].sort((a, b) => b.pct - a.pct)[0];
+export function localBriefing({ emsStatus, capacity, incoming = [], totals }) {
+  const diverting = emsStatus?.ems_status === "diverting";
+  const units = capacity?.units;
+  const tight = tightestUnit(units);
+  const blocker = blockingUnit(units);
+  const soon = dueSoon(incoming);
+  const pending = incoming.filter((run) => run.status === "pending");
+  const tightBit = tight ? `${tight.label} is tightest, ${tight.open} open` : "unit capacity is still loading";
   const lines = [
-    `Occupancy is ${mix.pct}% with ${mix.open} open beds${fullest ? `; ${fullest.name} is fullest at ${fullest.pct}%` : ""}.`,
+    diverting
+      ? `On diversion${emsStatus?.reason ? ` — ${emsStatus.reason}` : ""}. ${tightBit}.`
+      : `Accepting ambulances. ${tightBit}.`,
   ];
-  if (totals) {
+  if (soon.length) {
+    lines.push(
+      `${soon.length} ambulance${soon.length === 1 ? "" : "s"} in the next 15 minutes${
+        pending.length ? `, ${pending.length} still waiting for an answer` : ", every pre-alert answered"
+      }.`,
+    );
+  } else if (pending.length) {
+    lines.push(`No ambulance due in 15 minutes. ${pending.length} pre-alert${pending.length === 1 ? "" : "s"} still waiting for an answer.`);
+  } else {
+    lines.push("No ambulance due in the next 15 minutes.");
+  }
+  const first = [...pending].sort((a, b) => (a.eta_seconds ?? 0) - (b.eta_seconds ?? 0))[0];
+  if (first) {
+    lines.push(`Answer ${first.unit}: ESI ${first.esi} ${first.complaint_label}${first.bed_id ? `, bed ${first.bed_id}` : ""}.`);
+  } else if (!diverting && blocker) {
+    lines.push(`${blocker.label} is ${blocker.level === "full" ? "full" : "limited"}, ${blocker.open} open. Diversion is the lever if the next ambulance needs it.`);
+  } else if (totals) {
     const net = totals.admit - totals.discharge - totals.transfer;
     lines.push(
-      `Last 2 hours: ${totals.admit} admitted, ${totals.discharge} discharged${
-        turnover?.avg_minutes != null ? `, beds turn over in ${minutesText(turnover.avg_minutes)} min` : ""
-      } (${net > 0 ? `+${net} net, filling` : net < 0 ? `${net} net, emptying` : "balanced"}).`,
+      net > 0
+        ? `No decision waiting. Census is filling, +${net} net in 2 hours.`
+        : net < 0
+          ? `No decision waiting. Census is emptying, ${net} net in 2 hours.`
+          : "No decision waiting. Flow over the last 2 hours is balanced.",
     );
+  } else {
+    lines.push("No decision waiting.");
   }
-  lines.push(actions?.[0] ? `Suggested now: ${actions[0].title}.` : "No action needed right now.");
   return lines.map((line) => `- ${line}`).join("\n");
 }
 
