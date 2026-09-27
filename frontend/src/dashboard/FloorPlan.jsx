@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { CORE, FRAME, STATUS, spaceBucket } from "./floors";
+import { cleanEtaSeconds, formatEta } from "./insights";
 
 const SHELL = "M 5 3.2 H 75.6 V 40 L 60 56.6 H 5 Z";
 
@@ -118,7 +119,10 @@ function shortName(name) {
 // What a charge nurse needs to read off the plate for one bed, in two words.
 function bedLine(room) {
   if (room.patient) return { text: shortName(room.patient), fill: "#1f3f68" };
-  if (room.status === "cleaning") return { text: "Cleaning", fill: "#5b4a8f" };
+  if (room.status === "cleaning") {
+    const eta = cleanEtaSeconds(room);
+    return { text: eta ? `Ready in ${formatEta(eta)}` : "Ready now", fill: "#5b4a8f" };
+  }
   if (room.status === "reserved") return { text: room.holdFor ? `Held · ${shortName(room.holdFor)}` : "Held", fill: "#8a6200" };
   if (room.status === "blocked") return { text: "Out of service", fill: "#374151" };
   if (room.status === "available") return { text: "Open", fill: "#1d7a4a" };

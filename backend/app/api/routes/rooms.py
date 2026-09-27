@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.sim import assign_housekeeper, complete_clean, release_room, reserve_room
+from app.sim import assign_housekeeper, complete_clean, discharge_room, release_room, reserve_room
 
 router = APIRouter()
 
@@ -47,3 +47,9 @@ def complete(room_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=409, detail=message)
         return {"room_id": room_id, "opened": False, "reason": message}
     return {"room_id": room_id, "opened": True}
+
+
+@router.post("/rooms/{room_id}/discharge")
+def discharge(room_id: str, db: Session = Depends(get_db)):
+    _fail(discharge_room(db, room_id))
+    return {"room_id": room_id, "status": "cleaning"}

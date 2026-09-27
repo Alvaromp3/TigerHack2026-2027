@@ -94,8 +94,8 @@ def declare_incoming(db: Session, notice: str) -> int:
 def call_physicians(db: Session) -> int:
     with write_lock:
         state = db.get(HospitalState, 1)
-        if state is None or not state.surge:
-            raise ValueError("Call physicians after an incoming notice.")
+        if state is None:
+            raise ValueError("The hospital census is not ready.")
         if state.called_physicians:
             return state.called_physicians
         brought = 0
@@ -125,8 +125,8 @@ def call_physicians(db: Session) -> int:
 def divert_overflow(db: Session) -> int:
     with write_lock:
         state = db.get(HospitalState, 1)
-        if state is None or not state.surge:
-            raise ValueError("Divert after an incoming notice.")
+        if state is None:
+            raise ValueError("The hospital census is not ready.")
         people = _ed_patients(db)
         random.shuffle(people)
         sent = 0
@@ -1027,6 +1027,25 @@ def assign_housekeeper(db: Session, room_id: str, keeper_id: int) -> str | None:
         if state is not None and state.demo_room_id == room.id:
             state.demo_room_id = None
         _log(db, keeper.name, f"{keeper.name} assigned to {room.id}", room.id, "clean")
+        db.commit()
+    return None
+
+
+def discharge_room(db: Session, room_id: str) -> str | None:
+    """Discharge the patient in one bed on command. The bed goes into turnover."""
+    with write_lock:
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room was not found."
+        patient = room.patient
+        if patient is None:
+            return "Nobody is in that bed."
+        if room.kind == "or":
+            return "Patients leave the OR through recovery, not discharge."
+        if patient.acuity == "critical":
+            return f"{patient.name} is critical and cannot be discharged."
+        if _discharge_patient(db, patient) is None:
+            return "That patient is already moving. Try again."
         db.commit()
     return None
 

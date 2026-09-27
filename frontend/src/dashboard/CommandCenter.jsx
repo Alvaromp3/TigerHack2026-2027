@@ -3,6 +3,16 @@ import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import ChatPanel from "./ChatPanel";
+import CommandRail from "./CommandRail";
+import DemoTour from "./DemoTour";
+import {
+  NURSE_LOAD,
+  buildActions,
+  censusRooms,
+  earlyWarning,
+  forecast,
+  stayLabel,
+} from "./insights";
 import {
   BUILDING,
   FRAME,
@@ -18,7 +28,14 @@ import { apiUrl } from "../api/client";
 import { roomVisualSrc } from "./roomVisuals";
 import { flowBucket } from "./flowBuckets";
 import { buildLiveOps, incidentsFromCensus } from "./liveOps";
+import { AppNav } from "./AppBar";
+import FlowTab from "./FlowTab";
+import OpsTab from "./OpsTab";
+import OverviewTab from "./OverviewTab";
+import StaffTab from "./StaffTab";
+import { bedMix, floorRows, localBriefing } from "./ui";
 import "./dashboard.css";
+import "./exec.css";
 import logo from "./logo.png";
 
 const SFX_BY_DEPARTMENT = {
@@ -260,6 +277,12 @@ const NOTES = {
   reports: "Counts come from the live census and the last 200 flow events.",
   three: "3D is off. This command view is the measured 2D plate.",
 };
+
+const SURGE_PRESETS = [
+  "Train derailment on Route 9. Multiple critical casualties inbound.",
+  "Highway pile-up on I-70. Trauma patients inbound.",
+  "Building fire downtown. Burn and smoke-inhalation patients inbound.",
+];
 
 function Icon({ name }) {
   const common = {
@@ -568,11 +591,11 @@ export default function CommandCenter() {
   const [ops, setOps] = useState(null);
   const [actionNote, setActionNote] = useState("");
   const [floorId, setFloorId] = useState("F1");
-  const [selectedId, setSelectedId] = useState("ED-T1");
+  const [selectedId, setSelectedId] = useState(null);
   const [hover, setHover] = useState(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [nav, setNav] = useState("live");
+  const [nav, setNav] = useState("overview");
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [note, setNote] = useState(null);
   const [elevatorOpen, setElevatorOpen] = useState(false);
@@ -602,6 +625,10 @@ export default function CommandCenter() {
   const reloadRef = useRef(async () => {});
   const zoomRef = useRef(1.25);
   const [tab, setTab] = useState("overview");
+  const [insights, setInsights] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [briefing, setBriefing] = useState({ text: "", source: "rules", loading: false, at: 0 });
+  const lastSample = useRef(0);
   const [toast, setToast] = useState("");
   const [now, setNow] = useState(() => new Date());
 
@@ -621,7 +648,33 @@ export default function CommandCenter() {
   const selected = floor.rooms.find((room) => room.id === selectedId) || null;
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
+  const [surgeBusy, setSurgeBusy] = useState("");
+  const [surgeFormOpen, setSurgeFormOpen] = useState(false);
+  const [surgeDraft, setSurgeDraft] = useState(SURGE_PRESETS[0]);
+  const allBeds = useMemo(() => censusRooms(hospital), [hospital]);
+  const roomIds = useMemo(
+    () => new Set(hospital.flatMap((level) => level.rooms.map((room) => room.id))),
+    [hospital],
+  );
+  const outlook = useMemo(() => forecast(allBeds), [allBeds]);
+  const actions = useMemo(
+    () => buildActions({ rooms: allBeds, ops, surgeOn, calledPhysicians, incidents: openIncidents }),
+    [allBeds, ops, surgeOn, calledPhysicians, openIncidents],
+  );
+  const [demoStep, setDemoStep] = useState(null);
+  const [chatAsk, setChatAsk] = useState(null);
   const badge = openIncidents.length;
+  const mix = useMemo(() => bedMix(allBeds), [allBeds]);
+  const floors = useMemo(() => floorRows(hospital), [hospital]);
+  const deptLabels = useMemo(() => Object.fromEntries(allBeds.map((room) => [room.dept, room.deptLabel])), [allBeds]);
+  const edPatients = useMemo(
+    () => allBeds.filter((room) => (room.dept === "ed" || room.dept === "trauma") && room.patient).length,
+    [allBeds],
+  );
+  const briefingText = briefing.source === "ai" && briefing.text
+    ? briefing.text
+    : localBriefing({ mix, floors, totals: insights?.totals, turnover: insights?.turnover, actions });
+  const opsBadge = allBeds.filter((room) => room.status === "cleaning" && !room.housekeeper && room.ticksLeft !== 0).length;
   const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
   const queuePlace = useMemo(() => {
     const places = new Map();
@@ -635,10 +688,9 @@ export default function CommandCenter() {
   }, []);
 
   useEffect(() => {
-    if (!liveMap) return undefined;
     const timer = setInterval(() => setSyncTick(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [liveMap]);
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -700,6 +752,54 @@ export default function CommandCenter() {
     };
   }, []);
 
+  // Occupancy readings since the page opened, one every 5 s, for the trend sparkline.
+  useEffect(() => {
+    if (!allBeds.length) return;
+    const stamp = Date.now();
+    if (stamp - lastSample.current < 5000) return;
+    lastSample.current = stamp;
+    setHistory((points) => [...points.slice(-59), { t: stamp, pct: mix.pct }]);
+  }, [allBeds, mix.pct]);
+
+  useEffect(() => {
+    let stop = false;
+    async function pullInsights() {
+      try {
+        const res = await fetch(apiUrl("/api/insights?minutes=120&bucket=10"));
+        if (!stop && res.ok) setInsights(await res.json());
+      } catch {
+        // Trends are optional; the rest of the page keeps working.
+      }
+    }
+    pullInsights();
+    const timer = setInterval(pullInsights, 15000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  async function refreshBriefing() {
+    setBriefing((current) => ({ ...current, loading: true }));
+    try {
+      const res = await fetch(apiUrl("/api/briefing"));
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.briefing) {
+        setBriefing({ text: body.briefing, source: "ai", loading: false, at: Date.now() });
+        return;
+      }
+    } catch {
+      // Fall through to the computed briefing.
+    }
+    setBriefing({ text: "", source: "rules", loading: false, at: Date.now() });
+  }
+
+  useEffect(() => {
+    if (nav === "overview" && Date.now() - briefing.at > 120000 && !briefing.loading) refreshBriefing();
+    // Only re-check when the executive lands on the overview.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
   useEffect(() => {
     const ids = new Set(movements.map((item) => item.id));
     if (knownFlow.current == null) {
@@ -728,12 +828,13 @@ export default function CommandCenter() {
     function onKey(event) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        document.getElementById("map-search")?.focus();
+        setSearchOpen(true);
       }
       if (event.key === "Escape") {
         setElevatorOpen(false);
         setSearchOpen(false);
         setBellOpen(false);
+        setSurgeFormOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -757,7 +858,7 @@ export default function CommandCenter() {
     setNote(null);
     setSummaryOpen(true);
     setFitToken((token) => token + 1);
-    if (nav !== "incidents" && nav !== "flow" && nav !== "capacity" && nav !== "reports" && nav !== "command" && nav !== "staff") setNav("live");
+    setNav("live");
   }
 
   function playRoomSfx(id) {
@@ -792,21 +893,14 @@ export default function CommandCenter() {
 
   function chooseNav(id) {
     setElevatorOpen(false);
-    const boards = ["command", "capacity", "flow", "incidents", "reports", "staff"];
-    const onBoard = boards.includes(nav);
-    const stayingBoard = boards.includes(id);
-    if (onBoard && !stayingBoard) setFitToken((token) => token + 1);
-    setNav(id);
-    if (id === "live") {
-      setNote(null);
+    setNote(null);
+    setSearchOpen(false);
+    setBellOpen(false);
+    if (id === "live" && nav !== "live") {
       setSummaryOpen(true);
-      return;
+      setFitToken((token) => token + 1);
     }
-    if (id === "incidents" || stayingBoard) {
-      setNote(null);
-      return;
-    }
-    setNote(NOTES[id]);
+    setNav(id);
   }
 
   async function runAction(path, body) {
@@ -896,55 +990,192 @@ export default function CommandCenter() {
     setDivertedCount(data.diverted_count || 0);
   }
 
-  async function declareIncoming(notice) {
-    if (surgeOn) return;
+  // One surge request at a time; the result is shown on the map as a toast.
+  async function surgeStep(key, work) {
+    if (surgeBusy) return false;
+    setSurgeBusy(key);
     try {
+      const message = await work();
+      setActionNote(message);
+      setToast(message);
+      return true;
+    } catch (error) {
+      setActionNote(error.message);
+      setToast(error.message);
+      return false;
+    } finally {
+      setSurgeBusy("");
+    }
+  }
+
+  function declareIncoming(notice) {
+    if (surgeOn) return Promise.resolve(true);
+    return surgeStep("declare", async () => {
       const data = await runAction("/api/surge", { notice });
       applyActionState(data);
-      setActionNote(
-        data.admitted
-          ? `The hospital heard you. ${data.admitted} very sick patients are arriving. Now call doctors or send people to another hospital.`
-          : "The hospital heard you. Emergency has no open bed, so send patients to another hospital.",
-      );
-    } catch (error) {
-      setActionNote(error.message);
-    }
+      setSurgeFormOpen(false);
+      return data.admitted
+        ? `Surge declared. ${data.admitted} critical patients admitted to Emergency and ICU.`
+        : "Surge declared. Emergency has no open bed. Divert overflow to County General.";
+    });
   }
 
-  async function callPhysicians() {
-    try {
+  function callPhysicians() {
+    return surgeStep("call", async () => {
       const data = await runAction("/api/surge/physicians");
       applyActionState(data);
-      setActionNote(`${data.called} extra doctors are now at the hospital.`);
-    } catch (error) {
-      setActionNote(error.message);
-    }
+      return `${data.called} on-call physicians are now on duty.`;
+    });
   }
 
-  async function divertPatients() {
-    try {
+  function divertPatients() {
+    return surgeStep("divert", async () => {
       const data = await runAction("/api/surge/divert");
       applyActionState(data);
-      setActionNote(
-        data.diverted
-          ? `${data.diverted} patients went to County General. Those beds are free again.`
-          : "There is nobody left in Emergency to send away.",
-      );
-    } catch (error) {
-      setActionNote(error.message);
-    }
+      return data.diverted
+        ? `${data.diverted} Emergency patients transferred to County General. Their beds are in turnover.`
+        : "Emergency has nobody to transfer.";
+    });
   }
 
-  async function resetDemo() {
-    try {
+  function resetDemo({ silent = false } = {}) {
+    if (!silent && !window.confirm("Reset the demo? This ends the surge on the live hospital.")) {
+      return Promise.resolve(false);
+    }
+    return surgeStep("reset", async () => {
       const data = await runAction("/api/demo/reset");
       applyActionState(data);
-      setActionNote(`Start here: ${data.room_id} is dirty. Jordan Hale is waiting for that bed. Pick who cleans it, then press “The bed is ready”.`);
-      setNav("command");
-    } catch (error) {
-      setActionNote(error.message);
-    }
+      if (data.room_id && !silent) openOpsItem({ nav: "live", room_id: data.room_id });
+      return `Demo reset. ${data.room_id} is being cleaned and Jordan Hale is waiting for it.`;
+    });
   }
+
+  function openRoomById(roomId) {
+    openOpsItem({ nav: "live", room_id: roomId });
+  }
+
+  function runRailAction(item) {
+    const run = item.run;
+    if (!run) return Promise.resolve(false);
+    if (run.kind === "call") return callPhysicians();
+    if (run.kind === "divert") return divertPatients();
+    return surgeStep(item.id, async () => {
+      if (run.kind === "assign") {
+        await runAction(`/api/rooms/${run.roomId}/assign`, { housekeeper_id: run.keeperId });
+        return `Housekeeper on the way to ${run.roomId}. ${item.gain}.`;
+      }
+      if (run.kind === "complete") {
+        const data = await runAction(`/api/rooms/${run.roomId}/clean/complete`, {});
+        return data.opened ? `${run.roomId} is open for the next patient.` : data.reason;
+      }
+      if (run.kind === "discharge") {
+        await runAction(`/api/rooms/${run.roomId}/discharge`);
+        return `Patient discharged. ${run.roomId} is in turnover and opens after the clean.`;
+      }
+      if (run.kind === "resolve") {
+        await runAction(`/api/incidents/${run.incidentId}/resolve`);
+        return `${item.roomId} is back in service.`;
+      }
+      return "Done.";
+    });
+  }
+
+  const fullestFloor = [...floors].sort((a, b) => b.pct - a.pct)[0];
+  const DEMO = [
+    {
+      title: "Your hospital in five seconds",
+      say: "This is what the chief executive sees first. Occupancy, open beds, and a briefing written by AI from the live database, refreshed every hour, or on demand.",
+      cta: "Where is the pressure?",
+      focus: "briefing",
+      run: () => {},
+    },
+    {
+      title: "Every floor at a glance",
+      say: "Each bar is a floor: blue is occupied, green is open, violet is being cleaned. One click takes you to that floor's live map.",
+      cta: `Open ${fullestFloor ? fullestFloor.code : "the fullest floor"}`,
+      focus: "floors",
+      run: () => fullestFloor && goToFloor(fullestFloor.id),
+    },
+    {
+      title: "Every bed, live",
+      say: "This map is the real floor plan. Every room shows who is in it, and every bed in cleaning counts down until it reopens.",
+      cta: "Open a patient",
+      focus: "map",
+      run: () => {
+        const bed = allBeds.find((room) => room.floorId === floor.id && room.patient) || allBeds.find((room) => room.patient);
+        if (bed) openRoomById(bed.id);
+        setTab("overview");
+      },
+    },
+    {
+      title: "One click deeper",
+      say: "Patient, early-warning score from live vitals, and the care team with their real workload. The manager never has to call the floor to ask.",
+      cta: "See patient flow",
+      focus: "room",
+      run: () => chooseNav("flow"),
+    },
+    {
+      title: "Are patients moving?",
+      say: "Admissions against discharges every ten minutes. If more come in than go out, the hospital fills up. Bed turnover shows how fast a bed comes back.",
+      cta: "Check staffing",
+      focus: "flowchart",
+      run: () => chooseNav("staff"),
+    },
+    {
+      title: "Decide from the same screen",
+      say: "Patients per nurse by unit, against the target. Two levers: bring in on-call physicians, or transfer Emergency overflow to a partner hospital.",
+      cta: "Call in physicians",
+      focus: "decisions",
+      run: async () => {
+        await callPhysicians();
+        chooseNav("ops");
+      },
+    },
+    {
+      title: "What keeps beds closed",
+      say: "Every bed that is not ready yet, and exactly why: waiting for a housekeeper, being cleaned, or waiting for linen. Each one is a click away from moving.",
+      cta: "Ask the assistant",
+      focus: "pipeline",
+      run: () => {
+        setChatOpen(true);
+        setBellOpen(false);
+        setChatAsk({ id: Date.now(), text: "In two sentences: how is the hospital doing right now, and what should I do first?" });
+      },
+    },
+    {
+      title: "One screen to run the hospital.",
+      say: "Live beds, patient flow, staffing and turnover, with the decisions right next to the numbers. Built on a live database, ready for any hospital.",
+      cta: "Finish",
+      focus: "chat",
+      run: () => {
+        setChatOpen(false);
+        chooseNav("overview");
+      },
+    },
+  ];
+  const demoFocus = demoStep == null ? null : DEMO[demoStep].focus;
+
+  function startDemo() {
+    chooseNav("overview");
+    // Known starting point: nobody called in yet, one dirty bed with a patient waiting.
+    resetDemo({ silent: true });
+    setNote(null);
+    setBellOpen(false);
+    setSurgeFormOpen(false);
+    setDemoStep(0);
+  }
+
+  async function demoAction() {
+    const step = DEMO[demoStep];
+    await step.run?.();
+    setDemoStep((current) => (current == null || current >= DEMO.length - 1 ? null : current + 1));
+  }
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(""), 7000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   zoomRef.current = zoom;
 
@@ -1016,7 +1247,7 @@ export default function CommandCenter() {
     day: "numeric",
     year: "numeric",
   });
-  const rightOpen = Boolean(selected) || Boolean(note);
+  const rightOpen = liveMap || Boolean(selected) || Boolean(note);
 
   function openMovement(event) {
     if (!event.room_id) return;
@@ -1038,81 +1269,75 @@ export default function CommandCenter() {
   }
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <img className="brand-logo" src={logo} alt="" />
+    <div className={demoFocus ? `shell demo-on demo-${demoFocus}` : demoStep != null ? "shell demo-on" : "shell"}>
+      <header className="appbar">
+        <div className="ab-glow" aria-hidden="true" />
+        <div className="ab-brand">
+          <span className="ab-mark" aria-hidden="true">
+            <img src={logo} alt="" />
           </span>
-          <div className="brand-text">
-            <strong>Tiger Memorial Hospital</strong>
-            <small>SURGE COMMAND</small>
+          <div>
+            <strong>Tiger Memorial</strong>
+            <small>SurgeCommand</small>
           </div>
         </div>
 
-        <div className="search-wrap">
-          <Icon name="search" />
-          <input
-            id="map-search"
-            value={query}
-            placeholder="Search room, department, or patient"
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setSearchOpen(true);
-            }}
-            onFocus={() => setSearchOpen(true)}
-            aria-label="Search the hospital"
-          />
-          <span className="search-keys" aria-hidden="true">
-            <kbd>⌘</kbd>
-            <kbd>K</kbd>
-          </span>
-          {searchOpen && query.trim() && (
-            <div className="search-pop">
-              {hits.length === 0 && <p className="muted">No match on any floor.</p>}
-              {hits.map((hit) => (
-                <button key={`${hit.floor.id}-${hit.room.id}`} type="button" onClick={() => openHit(hit)}>
-                  <strong>{hit.room.id}</strong>
-                  <span>
-                    {hit.floor.code} · {hit.room.deptLabel}
-                    {hit.room.patient ? ` · ${hit.room.patient}` : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <AppNav
+          active={nav}
+          onChange={chooseNav}
+          live={flowLive}
+          badges={{ ops: opsBadge }}
+        />
 
-        {flowNotice && (
+        <div className="ab-tools">
+          <button type="button" className="ab-search" onClick={() => setSearchOpen(true)} aria-label="Search the hospital">
+            <Icon name="search" />
+            <span>Search</span>
+            <kbd>⌘K</kbd>
+          </button>
           <button
             type="button"
-            className="flow-notice"
-            onClick={() => setFlowNotice("")}
+            className={demoStep != null ? "ab-demo is-on" : "ab-demo"}
+            onClick={() => (demoStep != null ? setDemoStep(null) : startDemo())}
           >
-            {flowNotice}
+            {demoStep != null ? (
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" /></svg>
+            ) : (
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8 5 3.2Z" fill="currentColor" /></svg>
+            )}
+            {demoStep != null ? "Exit" : "Demo"}
           </button>
-        )}
-
-        <div className="top-tools">
           <div className="bell-wrap">
             <button
               type="button"
-              className="icon-btn"
+              className={chatOpen ? "ab-icon is-on" : "ab-icon"}
               aria-label="Assistant"
               onClick={() => {
                 setChatOpen((open) => !open);
                 setBellOpen(false);
               }}
             >
-              <Icon name="chat" />
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M10 2.5 11.8 8.2 17.5 10l-5.7 1.8L10 17.5l-1.8-5.7L2.5 10l5.7-1.8L10 2.5Z" fill="currentColor" />
+              </svg>
             </button>
-            <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} surgeOn={surgeOn} />
+            <ChatPanel
+              open={chatOpen}
+              onClose={() => setChatOpen(false)}
+              surgeOn={surgeOn}
+              roomIds={roomIds}
+              onOpenRoom={(roomId) => {
+                openRoomById(roomId);
+                setChatOpen(false);
+              }}
+              autoAsk={chatAsk}
+            />
           </div>
           <div className="bell-wrap">
             <button
               type="button"
-              className="icon-btn"
-              aria-label="Alerts"
+              className={bellOpen ? "ab-icon is-on" : "ab-icon"}
+              aria-label="Incidents"
               onClick={() => {
                 setBellOpen((open) => !open);
                 setChatOpen(false);
@@ -1145,16 +1370,108 @@ export default function CommandCenter() {
             )}
           </div>
           <LoginButton />
-          <span className="tool-divider" aria-hidden="true" />
-          <div className="clock">
-            <span>{dateLabel}</span>
+          <div className="ab-clock">
             <strong>{clock}</strong>
           </div>
         </div>
       </header>
 
+      {searchOpen && (
+        <div className="palette-veil" onClick={() => setSearchOpen(false)}>
+          <div className="palette" role="dialog" aria-label="Search the hospital" onClick={(event) => event.stopPropagation()}>
+            <div className="palette-input">
+              <Icon name="search" />
+              <input
+                id="map-search"
+                autoFocus
+                value={query}
+                placeholder="Search a room, unit, or patient"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && hits[0]) openHit(hits[0]);
+                }}
+                aria-label="Search the hospital"
+              />
+              <kbd>esc</kbd>
+            </div>
+            <div className="palette-list">
+              {!query.trim() && (
+                <>
+                  <p className="palette-kicker">Jump to</p>
+                  {floors.map((row) => (
+                    <button key={row.id} type="button" onClick={() => { setSearchOpen(false); goToFloor(row.id); }}>
+                      <strong>{row.code}</strong>
+                      <span>{row.name} · {row.pct}% occupied · {row.open} open</span>
+                    </button>
+                  ))}
+                </>
+              )}
+              {query.trim() && hits.length === 0 && <p className="palette-empty">No match on any floor.</p>}
+              {hits.map((hit) => (
+                <button key={`${hit.floor.id}-${hit.room.id}`} type="button" onClick={() => openHit(hit)}>
+                  <strong>{hit.room.id}</strong>
+                  <span>
+                    {hit.floor.code} · {hit.room.deptLabel}
+                    {hit.room.patient ? ` · ${hit.room.patient}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="workspace">
-        <main className="stage">
+        <main className={nav === "live" ? "stage" : "stage is-page"}>
+          {nav === "overview" && (
+            <OverviewTab
+              now={now}
+              mix={mix}
+              floors={floors}
+              outlook={outlook}
+              insights={insights}
+              history={history}
+              briefing={{ ...briefing, text: briefingText }}
+              actions={actions}
+              busy={surgeBusy}
+              onRefreshBriefing={refreshBriefing}
+              onOpenFloor={goToFloor}
+              onOpenRoom={openRoomById}
+              onRunAction={runRailAction}
+              onOpenTab={chooseNav}
+            />
+          )}
+          {nav === "flow" && (
+            <FlowTab insights={insights} movements={movements} deptLabels={deptLabels} now={syncTick} onOpenRoom={openRoomById} />
+          )}
+          {nav === "staff" && (
+            <StaffTab
+              ops={ops}
+              roster={roster}
+              calledPhysicians={calledPhysicians}
+              divertedCount={divertedCount}
+              edPatients={edPatients}
+              busy={surgeBusy}
+              onCallPhysicians={callPhysicians}
+              onDivert={divertPatients}
+            />
+          )}
+          {nav === "ops" && (
+            <OpsTab
+              beds={allBeds}
+              insights={insights}
+              ops={ops}
+              incidents={openIncidents}
+              busy={surgeBusy}
+              onOpenRoom={openRoomById}
+              onAssign={(room, keeper) =>
+                runRailAction({ id: `assign:${room.id}`, gain: "+1 bed soon", run: { kind: "assign", roomId: room.id, keeperId: keeper.id } })}
+              onComplete={(room) => runRailAction({ id: `open:${room.id}`, run: { kind: "complete", roomId: room.id } })}
+              onResolve={(incident) =>
+                runRailAction({ id: `incident:${incident.id}`, roomId: incident.room_id, run: { kind: "resolve", incidentId: incident.id } })}
+            />
+          )}
+          {nav === "live" && (
           <div
             ref={mapRef}
             className={`map-stage${rightOpen ? " has-detail" : ""} is-live`}
@@ -1381,8 +1698,19 @@ export default function CommandCenter() {
                     surgeOn={surgeOn}
                     movements={movements}
                     incidents={openIncidents.filter((item) => item.room_id === selected.id)}
-                    onOpenRoom={(roomId) => openOpsItem({ nav: "live", room_id: roomId })}
+                    onOpenRoom={openRoomById}
                     onClose={() => setSelectedId(null)}
+                  />
+                )}
+
+                {!note && !selected && (
+                  <CommandRail
+                    outlook={outlook}
+                    actions={actions}
+                    busy={surgeBusy}
+                    surgeOn={surgeOn}
+                    onRun={runRailAction}
+                    onOpenRoom={openRoomById}
                   />
                 )}
               </aside>
@@ -1432,8 +1760,19 @@ export default function CommandCenter() {
             )}
             </div>
           </div>
+          )}
         </main>
       </div>
+      {demoStep != null && (
+        <DemoTour
+          steps={DEMO}
+          index={demoStep}
+          busy={surgeBusy}
+          onAction={demoAction}
+          onBack={() => setDemoStep((current) => Math.max(0, (current || 0) - 1))}
+          onExit={() => setDemoStep(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1444,8 +1783,6 @@ const ROOM_TABS = [
   { id: "history", label: "Timeline" },
 ];
 
-// Matches NURSE_LOAD in backend/app/ops_snapshot.py.
-const NURSE_LOAD = 4;
 const BED_CHIPS = 6;
 
 function lookupStaff(staff, name, roomId) {
@@ -1468,50 +1805,6 @@ function lookupStaff(staff, name, roomId) {
 function initials(name) {
   const parts = String(name).replace(/^(Dr\.?|RN)\s+/i, "").trim().split(/\s+/);
   return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-}
-
-function stayLabel(ticks) {
-  if (ticks == null) return null;
-  const minutes = Math.round((ticks * 9) / 60);
-  if (minutes < 1) return "Just arrived";
-  if (minutes < 60) return `${minutes} min in bed`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min in bed`;
-}
-
-// Simplified NEWS2 from the last recorded vitals (no consciousness or O2 terms).
-function earlyWarning(room) {
-  if (room.heartRate == null) return null;
-  const rows = [];
-  const rr = room.respiratoryRate;
-  const spo2 = room.spo2;
-  const sbp = room.systolic;
-  const hr = room.heartRate;
-  const temp = room.temperature == null ? null : room.temperature / 10;
-  if (rr != null) rows.push({ label: "RR", value: rr, score: rr <= 8 ? 3 : rr <= 11 ? 1 : rr <= 20 ? 0 : rr <= 24 ? 2 : 3 });
-  if (spo2 != null) rows.push({ label: "SpO₂", value: `${spo2}%`, score: spo2 <= 91 ? 3 : spo2 <= 93 ? 2 : spo2 <= 95 ? 1 : 0 });
-  if (sbp != null) {
-    rows.push({
-      label: "BP",
-      value: `${sbp}/${room.diastolic ?? "—"}`,
-      score: sbp <= 90 ? 3 : sbp <= 100 ? 2 : sbp <= 110 ? 1 : sbp <= 219 ? 0 : 3,
-    });
-  }
-  rows.push({ label: "HR", value: hr, score: hr <= 40 ? 3 : hr <= 50 ? 1 : hr <= 90 ? 0 : hr <= 110 ? 1 : hr <= 130 ? 2 : 3 });
-  if (temp != null) {
-    rows.push({
-      label: "Temp",
-      value: `${temp.toFixed(1)}°`,
-      score: temp <= 35 ? 3 : temp <= 36 ? 1 : temp <= 38 ? 0 : temp <= 39 ? 1 : 2,
-    });
-  }
-  const total = rows.reduce((sum, row) => sum + row.score, 0);
-  const level = total >= 7 ? "high" : total >= 5 || rows.some((row) => row.score === 3) ? "medium" : "low";
-  const advice = {
-    high: "Emergency response. Continuous monitoring.",
-    medium: "Urgent review by the attending.",
-    low: "Routine observation.",
-  }[level];
-  return { total, level, advice, rows };
 }
 
 function unitMix(beds) {
@@ -1673,7 +1966,7 @@ function RoomCard({
               <div className="rc-tags">
                 {occupied && <span className="rc-tag">{esiFor(room.status)}</span>}
                 {occupied && (
-                  <span className={room.needsOr ? "rc-tag is-alert" : "rc-tag is-next"}>
+                  <span className={room.needsOr ? "rc-tag is-alert" : dispositionFor(room, surgeOn) === "Must stay" ? "rc-tag" : "rc-tag is-next"}>
                     Next · {dispositionFor(room, surgeOn)}
                   </span>
                 )}
