@@ -27,6 +27,6 @@ def health_check(db: Session = Depends(get_db)):
         "uptime_seconds": metrics.uptime_seconds(),
         "database": database,
         "simulation": {"last_tick_age_seconds": ticks["age_seconds"], "stalled": stalled},
-        "ai": {"configured": bool(settings.google_api_key)},
+        "ai": {"configured": bool(settings.openrouter_api_key)},
         "sso": {"configured": bool(settings.auth0_domain and settings.auth0_client_id)},
     }

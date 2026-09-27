@@ -63,7 +63,7 @@ def _integration_status(system: dict, last_at: datetime | None, now: datetime) -
     if system["id"] == "identity":
         return "connected" if settings.auth0_domain and settings.auth0_client_id else "not_configured"
     if system["id"] == "ops-ai":
-        return "connected" if settings.google_api_key else "not_configured"
+        return "connected" if settings.openrouter_api_key else "not_configured"
     if system["mode"] == "available":
         return "not_connected"
     if last_at is None:
@@ -77,9 +77,7 @@ def _integration_status(system: dict, last_at: datetime | None, now: datetime) -
 
 
 def _ai_model() -> str | None:
-    from app.api.routes.chat import _working_model
-
-    return _working_model["name"] or settings.google_model
+    return settings.openrouter_model or None
 
 
 @router.get("/catalog", summary="Systems and event types known to the platform")
@@ -193,7 +191,7 @@ def overview(db: Session = Depends(get_db)):
             "database": {"engine": "PostgreSQL" if "postgres" in settings.database_url else "SQL", "latency_ms": db_ms},
             "simulation": ticks,
             "requests": requests,
-            "ai": {"configured": bool(settings.google_api_key), "model": _ai_model()},
+            "ai": {"configured": bool(settings.openrouter_api_key), "model": _ai_model()},
             "sso": {"configured": bool(settings.auth0_domain and settings.auth0_client_id)},
         },
         "webhooks": {

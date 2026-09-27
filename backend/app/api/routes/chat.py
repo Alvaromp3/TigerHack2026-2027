@@ -44,66 +44,42 @@ _briefing_cache: dict = {"at": 0.0, "text": None}
 BRIEFING_TTL_SECONDS = 45
 
 
-# Google retires models for new keys without notice. Try the configured model first,
-# then newer fallbacks, and remember whichever one answered.
-FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-flash-latest")
-_working_model: dict = {"name": None}
-
-
-def _model_candidates() -> list[str]:
-    names = [_working_model["name"], settings.google_model, *FALLBACK_MODELS]
-    return [name for index, name in enumerate(names) if name and name not in names[:index]]
-
-
-def _retired(status: int, message: str) -> bool:
-    text = message.lower()
-    return status in {400, 403, 404} and any(
-        marker in text for marker in ("no longer available", "not found", "is not supported", "deprecated")
-    )
-
-
-def _gemini(system_text: str, contents: list[dict], max_tokens: int) -> str:
-    last_error = "The assistant could not answer."
-    for model in _model_candidates():
-        config = {"temperature": 0.3, "maxOutputTokens": max_tokens}
-        if model.startswith("gemini-2.5"):
-            # 2.5 Flash can skip thinking entirely, which keeps answers fast.
-            config["thinkingConfig"] = {"thinkingBudget": 0}
-        try:
-            response = httpx.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                headers={
-                    "x-goog-api-key": settings.google_api_key,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "system_instruction": {"parts": [{"text": system_text}]},
-                    "contents": contents,
-                    "generationConfig": config,
-                },
-                timeout=60,
-            )
-        except httpx.HTTPError:
-            raise HTTPException(status_code=502, detail="The assistant could not be reached.") from None
-        try:
-            data = response.json()
-        except ValueError:
-            raise HTTPException(status_code=502, detail="The assistant sent an unreadable answer.") from None
-        if response.status_code >= 400:
-            last_error = (data.get("error") or {}).get("message") or last_error
-            if _retired(response.status_code, last_error):
-                continue
-            raise HTTPException(status_code=502, detail=last_error)
-        parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        # Thinking models may return thought parts; only keep the visible answer.
-        content = "".join(
-            part.get("text", "") for part in parts if isinstance(part, dict) and not part.get("thought")
+def _complete(system_text: str, messages: list[dict], max_tokens: int) -> str:
+    payload = {
+        "model": settings.openrouter_model,
+        "messages": [{"role": "system", "content": system_text}, *messages],
+        "temperature": 0.3,
+        "max_tokens": max_tokens,
+    }
+    # 2.5 Flash can spend the whole budget on hidden reasoning and return nothing visible.
+    if "gemini-2.5" in settings.openrouter_model:
+        payload["reasoning"] = {"effort": "none"}
+    try:
+        response = httpx.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openrouter_api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
         )
-        if not content.strip():
-            raise HTTPException(status_code=502, detail="The assistant returned an empty answer.")
-        _working_model["name"] = model
-        return content
-    raise HTTPException(status_code=502, detail=last_error)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="The assistant could not be reached.") from None
+    try:
+        data = response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="The assistant sent an unreadable answer.") from None
+    if response.status_code >= 400:
+        message = (data.get("error") or {}).get("message") or "The assistant could not answer."
+        raise HTTPException(status_code=502, detail=message)
+    choice = (data.get("choices") or [{}])[0]
+    raw = (choice.get("message") or {}).get("content") or ""
+    if isinstance(raw, list):
+        raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
+    if not str(raw).strip():
+        raise HTTPException(status_code=502, detail="The assistant returned an empty answer.")
+    return str(raw)
 
 
 def _ems_context(db: Session) -> dict:
@@ -144,18 +120,17 @@ class ChatIn(BaseModel):
 
 @router.get("/chat/status")
 def chat_status():
-    """Lets the team check on Render that GOOGLE_API_KEY is loaded, without exposing it."""
+    """Lets the team check that OPENROUTER_API_KEY is loaded, without exposing it."""
     return {
-        "configured": bool(settings.google_api_key),
-        "model": _working_model["name"] or settings.google_model,
-        "candidates": _model_candidates(),
+        "configured": bool(settings.openrouter_api_key),
+        "model": settings.openrouter_model,
     }
 
 
 @router.get("/briefing")
 def briefing(db: Session = Depends(get_db)):
     """Three-line executive summary. Cached briefly so every open screen shares one call."""
-    if not settings.google_api_key:
+    if not settings.openrouter_api_key:
         raise HTTPException(status_code=503, detail="The assistant is not configured.")
     now = time.monotonic()
     if _briefing_cache["text"] and now - _briefing_cache["at"] < BRIEFING_TTL_SECONDS:
@@ -177,9 +152,9 @@ def briefing(db: Session = Depends(get_db)):
         "length_of_stay_minutes": trends["los"],
         **_ems_context(db),
     }
-    text = _gemini(
+    text = _complete(
         BRIEFING + "\n\nSnapshot:\n" + json.dumps(brief, default=str),
-        [{"role": "user", "parts": [{"text": "Write this hour's briefing."}]}],
+        [{"role": "user", "content": "Write this hour's briefing."}],
         1536,
     ).strip()
     _briefing_cache.update(at=now, text=text)
@@ -188,7 +163,7 @@ def briefing(db: Session = Depends(get_db)):
 
 @router.post("/chat")
 def chat(body: ChatIn, db: Session = Depends(get_db)):
-    if not settings.google_api_key:
+    if not settings.openrouter_api_key:
         raise HTTPException(status_code=503, detail="The assistant is not configured.")
     turns = []
     for turn in body.messages[-12:]:
@@ -202,6 +177,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Send a question.")
 
     snapshot = build_ops(db)
+    ems_context = _ems_context(db)
     db.commit()
     db.close()
     brief = {
@@ -218,14 +194,8 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         "beds": snapshot.get("beds", [])[:40],
         "units": snapshot["units"],
         "pending": snapshot["pending"][:20],
-        **_ems_context(db),
+        **ems_context,
     }
-    contents = [
-        {
-            "role": "user" if turn["role"] == "user" else "model",
-            "parts": [{"text": turn["content"]}],
-        }
-        for turn in turns
-    ]
-    content = _gemini(SYSTEM + "\n\nOperations snapshot:\n" + json.dumps(brief, default=str), contents, 2048)
+    messages = [{"role": turn["role"], "content": turn["content"]} for turn in turns]
+    content = _complete(SYSTEM + "\n\nOperations snapshot:\n" + json.dumps(brief, default=str), messages, 2048)
     return {"reply": content.strip()}
