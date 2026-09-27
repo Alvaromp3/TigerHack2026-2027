@@ -1,5 +1,6 @@
 import { BED_MIX, Legend, MixBar, SERIES } from "./charts";
-import { Card, Kpi, PageHead, minutesText } from "./ui";
+import { ESI, UNIT_ORDER, countdown } from "./network/ems";
+import { Card, Kpi, PageHead } from "./ui";
 
 function greeting(now) {
   const hour = now.getHours();
@@ -31,7 +32,6 @@ export default function OverviewTab({
   floors,
   outlook,
   insights,
-  history,
   briefing,
   actions,
   busy,
@@ -40,12 +40,20 @@ export default function OverviewTab({
   onOpenRoom,
   onRunAction,
   onOpenTab,
+  capacity,
+  incoming = [],
+  emsSummary,
+  emsStatus,
+  calledPhysicians = 0,
+  onCallPhysicians,
+  onOpenAmbulances,
 }) {
   const totals = insights?.totals;
   const series = insights?.series || [];
   const admits = series.map((slot) => slot.admit);
   const discharges = series.map((slot) => slot.discharge);
-  const occupancy = history.map((point) => point.pct);
+  const soon = incoming.filter((run) => run.status === "arrived" || (run.eta_seconds ?? 9999) <= 900);
+  const diverting = emsStatus?.ems_status === "diverting";
   const net = totals ? totals.admit - totals.discharge - totals.transfer : null;
   const dateLabel = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
@@ -54,7 +62,7 @@ export default function OverviewTab({
       <PageHead
         kicker={dateLabel}
         title={`${greeting(now)}. Here is Tiger Memorial.`}
-        sub="Every number on this page comes from the live census and refreshes every two seconds."
+        sub="Live capacity in every unit, the ambulances on their way, and the decisions that keep the doors open."
       />
 
       <div className="ov-hero">
@@ -96,19 +104,37 @@ export default function OverviewTab({
               <small>now → next {outlook.horizon} min</small>
             </div>
           </div>
-          <MixBar mix={mix} total={mix.total} height={14} />
-          <Legend items={BED_MIX.map((item) => ({ ...item, value: mix[item.id] }))} />
+          {capacity ? (
+            <ul className="unit-cap">
+              {UNIT_ORDER.map((key) => {
+                const unit = capacity.units[key];
+                return (
+                  <li key={key} className={`is-${unit.level}`}>
+                    <span>{unit.label}</span>
+                    <div className="hunit-bar"><i style={{ width: `${unit.occupancy_pct}%` }} /></div>
+                    <b>{unit.occupancy_pct}%</b>
+                    <small>{unit.open} open</small>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <>
+              <MixBar mix={mix} total={mix.total} height={14} />
+              <Legend items={BED_MIX.map((item) => ({ ...item, value: mix[item.id] }))} />
+            </>
+          )}
         </section>
       </div>
 
       <div className="kpi-row">
         <Kpi
-          label="Occupancy trend"
-          icon="trend"
-          value={`${mix.pct}%`}
-          note={history.length > 1 ? `since you opened · ${history.length} readings` : "collecting readings"}
-          spark={occupancy}
-          sparkColor="var(--viz-occupied)"
+          label="Ambulances en route"
+          icon="transfer"
+          loading={!emsSummary}
+          value={emsSummary?.en_route ?? "—"}
+          note={emsSummary?.pending ? `${emsSummary.pending} waiting for an answer` : "all pre-alerts answered"}
+          tone={emsSummary?.pending ? "warn" : undefined}
         />
         <Kpi
           label="Admitted · 2 h"
@@ -129,13 +155,46 @@ export default function OverviewTab({
           sparkColor={SERIES.discharge.color}
         />
         <Kpi
-          label="Bed turnover"
+          label="Avg offload time"
           icon="clock"
-          loading={!insights}
-          value={minutesText(insights?.turnover?.avg_minutes)}
-          unit="min"
-          note={insights?.turnover?.samples ? `average of ${insights.turnover.samples} beds` : "no beds turned yet"}
+          loading={!emsSummary}
+          value={emsSummary?.offload_avg_seconds != null ? `${Math.floor(emsSummary.offload_avg_seconds / 60)}:${String(emsSummary.offload_avg_seconds % 60).padStart(2, "0")}` : "—"}
+          note={`${emsSummary?.arrivals_24h ?? 0} arrivals · ${emsSummary?.diverted_24h ?? 0} diverted today`}
         />
+      </div>
+
+      <div className="ov-ems">
+        <Card
+          kicker="Next 15 minutes"
+          title={soon.length ? `${soon.length} ambulances arriving` : "No ambulance due"}
+          icon="transfer"
+          action={<button type="button" className="link-btn" onClick={onOpenAmbulances}>Ambulances →</button>}
+        >
+          <ul className="arrivals">
+            {soon.map((run) => (
+              <li key={run.id} style={{ "--esi": ESI[run.esi]?.color, "--esi-soft": ESI[run.esi]?.soft }}>
+                <span className="esi-badge">ESI {run.esi}</span>
+                <strong>{run.complaint_label}</strong>
+                <small>{run.unit}</small>
+                <em>{run.status === "pending" ? "needs an answer" : run.bed_id ? `→ ${run.bed_id}` : "no bed yet"}</em>
+                <b>{run.status === "arrived" ? "at bay" : countdown(run.eta_seconds)}</b>
+              </li>
+            ))}
+            {!soon.length && <li className="empty-note">Pre-alerts from ambulance crews appear here as soon as they are sent.</li>}
+          </ul>
+        </Card>
+        <Card kicker="Decisions" title="Keep the doors open" icon="phone" className="ov-decide">
+          <div className={diverting ? "ov-status is-diverting" : "ov-status"}>
+            <i />
+            <div>
+              <strong>{diverting ? "On ambulance diversion" : "Accepting ambulances"}</strong>
+              <small>{diverting ? emsStatus?.reason || "At capacity" : "Visible to every ambulance company in the region"}</small>
+            </div>
+          </div>
+          <button type="button" className="dark-btn ov-call" disabled={Boolean(busy) || calledPhysicians > 0} onClick={onCallPhysicians}>
+            {calledPhysicians ? `✓ ${calledPhysicians} on-call physicians on duty` : busy === "call" ? "Calling…" : "Call in on-call physicians"}
+          </button>
+        </Card>
       </div>
 
       <div className="ov-grid">

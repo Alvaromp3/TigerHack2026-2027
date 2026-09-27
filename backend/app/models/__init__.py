@@ -194,3 +194,49 @@ class AuditEntry(Base):
     target: Mapped[str | None] = mapped_column(String(40), nullable=True)
     detail: Mapped[str | None] = mapped_column(String(240), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AmbulanceRun(Base):
+    """One ambulance transport: the pre-alert, the hospital's answer, arrival and handoff."""
+
+    __tablename__ = "ambulance_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(16), index=True)
+    unit: Mapped[str] = mapped_column(String(40))
+    agency: Mapped[str] = mapped_column(String(80))
+    zone: Mapped[str] = mapped_column(String(24))
+    esi: Mapped[int] = mapped_column(Integer)
+    complaint: Mapped[str] = mapped_column(String(16))
+    summary: Mapped[str] = mapped_column(String(200))
+    patient_name: Mapped[str] = mapped_column(String(80))
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    heart_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    systolic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diastolic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    spo2: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    respiratory_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    destination: Mapped[str] = mapped_column(String(80), index=True)
+    # pending -> accepted -> arrived -> handed_off, or diverted at any point before arrival.
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    bed_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    diverted_to: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    simulated: Mapped[bool] = mapped_column(Boolean, default=True)
+    eta_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    handed_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FacilityStatus(Base):
+    """The hospital's public ambulance status, published to the regional network."""
+
+    __tablename__ = "facility_status"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ems_status: Mapped[str] = mapped_column(String(16), default="accepting")
+    reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

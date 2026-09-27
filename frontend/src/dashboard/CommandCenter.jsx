@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import ChatPanel from "./ChatPanel";
@@ -25,18 +24,20 @@ import {
   spaceBucket,
   summarize,
 } from "./floors";
-import { apiUrl } from "../api/client";
-import { roomVisualSrc } from "./roomVisuals";
+import { actorHeaders, apiUrl } from "../api/client";
 import { flowBucket } from "./flowBuckets";
 import { buildLiveOps, incidentsFromCensus } from "./liveOps";
+import AmbulancesTab from "./AmbulancesTab";
 import { AppNav } from "./AppBar";
-import FlowTab from "./FlowTab";
+import NetworkTab from "./NetworkTab";
+import OpenDataTab from "./OpenDataTab";
 import OpsTab from "./OpsTab";
 import OverviewTab from "./OverviewTab";
-import StaffTab from "./StaffTab";
+import { ESI, countdown } from "./network/ems";
 import { bedMix, floorRows, localBriefing } from "./ui";
 import "./dashboard.css";
 import "./exec.css";
+import "./ems.css";
 import logo from "./logo.png";
 
 const SFX_BY_DEPARTMENT = {
@@ -279,12 +280,6 @@ const NOTES = {
   three: "3D is off. This command view is the measured 2D plate.",
 };
 
-const SURGE_PRESETS = [
-  "Train derailment on Route 9. Multiple critical casualties inbound.",
-  "Highway pile-up on I-70. Trauma patients inbound.",
-  "Building fire downtown. Burn and smoke-inhalation patients inbound.",
-];
-
 function Icon({ name }) {
   const common = {
     width: 20,
@@ -491,6 +486,13 @@ function situationFor(room, floor) {
       why: `${room.type || room.deptLabel} on ${floor.name}. This is not an inpatient bed.`,
     };
   }
+  if (!room.status) {
+    return {
+      band: "Loading",
+      tone: "is-support",
+      why: "Waiting for the live census to report this bed.",
+    };
+  }
   if (room.patient) {
     const word = severityWord(room.status);
     return {
@@ -627,9 +629,7 @@ export default function CommandCenter() {
   const zoomRef = useRef(1.25);
   const [tab, setTab] = useState("overview");
   const [insights, setInsights] = useState(null);
-  const [history, setHistory] = useState([]);
   const [briefing, setBriefing] = useState({ text: "", source: "rules", loading: false, at: 0 });
-  const lastSample = useRef(0);
   const [toast, setToast] = useState("");
   const [now, setNow] = useState(() => new Date());
 
@@ -650,8 +650,13 @@ export default function CommandCenter() {
   const hits = useMemo(() => findRooms(hospital, query), [hospital, query]);
   const openIncidents = useMemo(() => incidents.filter((item) => item.status === "open"), [incidents]);
   const [surgeBusy, setSurgeBusy] = useState("");
-  const [surgeFormOpen, setSurgeFormOpen] = useState(false);
-  const [surgeDraft, setSurgeDraft] = useState(SURGE_PRESETS[0]);
+  const [emsRuns, setEmsRuns] = useState([]);
+  const [emsSummary, setEmsSummary] = useState(null);
+  const [emsStatus, setEmsStatus] = useState({ ems_status: "accepting", reason: null });
+  const [region, setRegion] = useState([]);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [statusReason, setStatusReason] = useState("");
+  const seenRuns = useRef(null);
   const allBeds = useMemo(() => censusRooms(hospital), [hospital]);
   const roomIds = useMemo(
     () => new Set(hospital.flatMap((level) => level.rooms.map((room) => room.id))),
@@ -662,7 +667,6 @@ export default function CommandCenter() {
     () => buildActions({ rooms: allBeds, ops, surgeOn, calledPhysicians, incidents: openIncidents }),
     [allBeds, ops, surgeOn, calledPhysicians, openIncidents],
   );
-  const badge = openIncidents.length;
   const mix = useMemo(() => bedMix(allBeds), [allBeds]);
   const floors = useMemo(() => floorRows(hospital), [hospital]);
   const deptLabels = useMemo(() => Object.fromEntries(allBeds.map((room) => [room.dept, room.deptLabel])), [allBeds]);
@@ -670,9 +674,26 @@ export default function CommandCenter() {
     () => allBeds.filter((room) => (room.dept === "ed" || room.dept === "trauma") && room.patient).length,
     [allBeds],
   );
-  const briefingText = briefing.source === "ai" && briefing.text
-    ? briefing.text
-    : localBriefing({ mix, floors, totals: insights?.totals, turnover: insights?.turnover, actions });
+  let briefingText = "- Connecting to the live census.";
+  if (briefing.source === "ai" && briefing.text) briefingText = briefing.text;
+  else if (mix.total) briefingText = localBriefing({ mix, floors, totals: insights?.totals, turnover: insights?.turnover, actions });
+  const incoming = useMemo(
+    () => emsRuns.filter((run) => run.destination === "Tiger Memorial" && ["pending", "accepted", "arrived"].includes(run.status)),
+    [emsRuns],
+  );
+  const pendingRuns = useMemo(() => incoming.filter((run) => run.status === "pending"), [incoming]);
+  const bellCount = openIncidents.length + pendingRuns.length;
+  const emsByRoom = useMemo(() => {
+    const map = {};
+    for (const run of incoming) {
+      if (!run.bed_id || run.status === "pending") continue;
+      const left = run.status === "arrived" ? "at bay" : countdown((new Date(run.eta_at).getTime() - syncTick) / 1000);
+      map[run.bed_id] = { label: `🚑 ESI ${run.esi} · ${left}`, color: ESI[run.esi]?.color, run };
+    }
+    return map;
+  }, [incoming, syncTick]);
+  const emsBayActive = incoming.some((run) => run.status === "arrived");
+  const homeCapacity = region.find((row) => row.name === "Tiger Memorial") || null;
   const opsBadge = allBeds.filter((room) => room.status === "cleaning" && !room.housekeeper && room.ticksLeft !== 0).length;
   const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
   const queuePlace = useMemo(() => {
@@ -751,14 +772,62 @@ export default function CommandCenter() {
     };
   }, []);
 
-  // Occupancy readings since the page opened, one every 5 s, for the trend sparkline.
   useEffect(() => {
-    if (!allBeds.length) return;
-    const stamp = Date.now();
-    if (stamp - lastSample.current < 5000) return;
-    lastSample.current = stamp;
-    setHistory((points) => [...points.slice(-59), { t: stamp, pct: mix.pct }]);
-  }, [allBeds, mix.pct]);
+    let stop = false;
+    let beat = 0;
+    async function pullEms() {
+      const slow = beat % 3 === 0;
+      beat += 1;
+      try {
+        const requests = [fetch(apiUrl("/api/ems/runs?active=true")), fetch(apiUrl("/api/ems/status"))];
+        if (slow) requests.push(fetch(apiUrl("/api/ems/summary")), fetch(apiUrl("/api/public/availability")));
+        const [runsRes, statusRes, summaryRes, regionRes] = await Promise.all(requests);
+        if (stop) return;
+        if (runsRes.ok) setEmsRuns((await runsRes.json()).runs || []);
+        if (statusRes.ok) setEmsStatus(await statusRes.json());
+        if (summaryRes?.ok) setEmsSummary(await summaryRes.json());
+        if (regionRes?.ok) setRegion((await regionRes.json()).hospitals || []);
+      } catch {
+        // The census poll reports connectivity; ambulances catch up on the next beat.
+      }
+    }
+    pullEms();
+    const timer = setInterval(pullEms, 2000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  // Two-tone chime when a new pre-alert arrives (existing room sounds are untouched).
+  useEffect(() => {
+    const ids = new Set(pendingRuns.map((run) => run.id));
+    if (seenRuns.current === null) {
+      seenRuns.current = ids;
+      return;
+    }
+    const fresh = [...ids].some((id) => !seenRuns.current.has(id));
+    seenRuns.current = ids;
+    if (!fresh) return;
+    try {
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      [880, 660].forEach((pitch, index) => {
+        const tone = context.createOscillator();
+        const gain = context.createGain();
+        tone.frequency.value = pitch;
+        tone.type = "sine";
+        gain.gain.setValueAtTime(0.0001, context.currentTime + index * 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + index * 0.18 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + index * 0.18 + 0.3);
+        tone.connect(gain).connect(context.destination);
+        tone.start(context.currentTime + index * 0.18);
+        tone.stop(context.currentTime + index * 0.18 + 0.32);
+      });
+      setTimeout(() => context.close(), 900);
+    } catch {
+      // Audio is optional.
+    }
+  }, [pendingRuns]);
 
   useEffect(() => {
     let stop = false;
@@ -833,7 +902,7 @@ export default function CommandCenter() {
         setElevatorOpen(false);
         setSearchOpen(false);
         setBellOpen(false);
-        setSurgeFormOpen(false);
+        setStatusOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -907,7 +976,7 @@ export default function CommandCenter() {
     try {
       res = await fetch(apiUrl(path), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...actorHeaders() },
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
@@ -1007,21 +1076,9 @@ export default function CommandCenter() {
     }
   }
 
-  function declareIncoming(notice) {
-    if (surgeOn) return Promise.resolve(true);
-    return surgeStep("declare", async () => {
-      const data = await runAction("/api/surge", { notice });
-      applyActionState(data);
-      setSurgeFormOpen(false);
-      return data.admitted
-        ? `Surge declared. ${data.admitted} critical patients admitted to Emergency and ICU.`
-        : "Surge declared. Emergency has no open bed. Divert overflow to County General.";
-    });
-  }
-
   function callPhysicians() {
     return surgeStep("call", async () => {
-      const data = await runAction("/api/surge/physicians");
+      const data = await runAction("/api/decisions/on-call");
       applyActionState(data);
       return `${data.called} on-call physicians are now on duty.`;
     });
@@ -1029,11 +1086,59 @@ export default function CommandCenter() {
 
   function divertPatients() {
     return surgeStep("divert", async () => {
-      const data = await runAction("/api/surge/divert");
+      const data = await runAction("/api/decisions/transfer-overflow");
       applyActionState(data);
       return data.diverted
         ? `${data.diverted} Emergency patients transferred to County General. Their beds are in turnover.`
         : "Emergency has nobody to transfer.";
+    });
+  }
+
+  async function emsAction(path, body) {
+    const res = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...actorHeaders() },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "That did not save. Try again.");
+    const [runsRes, summaryRes] = await Promise.all([fetch(apiUrl("/api/ems/runs?active=true")), fetch(apiUrl("/api/ems/summary"))]);
+    if (runsRes.ok) setEmsRuns((await runsRes.json()).runs || []);
+    if (summaryRes.ok) setEmsSummary(await summaryRes.json());
+    await reloadRef.current();
+    return data;
+  }
+
+  function acceptRun(run, bedId) {
+    return surgeStep(`accept:${run.id}`, async () => {
+      const data = await emsAction(`/api/ems/runs/${run.id}/accept`, { bed_id: bedId });
+      return `${data.unit} accepted. ${data.bed_id} is held on the live map.`;
+    });
+  }
+
+  function divertRun(run, to) {
+    return surgeStep(`divert:${run.id}`, async () => {
+      const data = await emsAction(`/api/ems/runs/${run.id}/divert`, { to });
+      return `${data.unit} diverted to ${data.diverted_to}. The crew has been told.`;
+    });
+  }
+
+  function handoffRun(run) {
+    return surgeStep(`handoff:${run.id}`, async () => {
+      const data = await emsAction(`/api/ems/runs/${run.id}/handoff`);
+      return `${data.patient_name} is in ${data.bed_id}. Offload took ${data.offload_seconds ?? 0}s.`;
+    });
+  }
+
+  function changeEmsStatus(next) {
+    return surgeStep("ems-status", async () => {
+      const data = await emsAction("/api/ems/status", { ems_status: next, reason: next === "diverting" ? statusReason || "ED at capacity" : null });
+      setEmsStatus(data);
+      setStatusOpen(false);
+      setStatusReason("");
+      return next === "diverting"
+        ? "Tiger Memorial is on diversion. The regional network and ambulance companies see it now."
+        : "Tiger Memorial is accepting ambulances again.";
     });
   }
 
@@ -1182,10 +1287,44 @@ export default function CommandCenter() {
           active={nav}
           onChange={chooseNav}
           live={flowLive}
-          badges={{ ops: opsBadge }}
+          badges={{ ops: opsBadge, ambulances: incoming.filter((run) => run.status !== "arrived").length }}
         />
 
         <div className="ab-tools">
+          <div className="ems-status-wrap">
+            <button
+              type="button"
+              className={emsStatus.ems_status === "diverting" ? "ems-pill is-diverting" : "ems-pill"}
+              aria-expanded={statusOpen}
+              onClick={() => setStatusOpen((open) => !open)}
+            >
+              <i />
+              {emsStatus.ems_status === "diverting" ? "On diversion" : "Accepting ambulances"}
+            </button>
+            {statusOpen && (
+              <div className="ems-status-pop">
+                <strong>Ambulance status</strong>
+                <p>Published to the regional network, the public board and every ambulance company subscribed to alerts.</p>
+                {emsStatus.ems_status === "accepting" ? (
+                  <>
+                    <input
+                      value={statusReason}
+                      onChange={(event) => setStatusReason(event.target.value)}
+                      placeholder="Reason, e.g. ED at capacity"
+                      maxLength={160}
+                    />
+                    <button type="button" className="ems-go is-divert" disabled={Boolean(surgeBusy)} onClick={() => changeEmsStatus("diverting")}>
+                      Go on diversion
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="ems-go" disabled={Boolean(surgeBusy)} onClick={() => changeEmsStatus("accepting")}>
+                    Accept ambulances again
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <button type="button" className="ab-search" onClick={() => setSearchOpen(true)} aria-label="Search the hospital">
             <Icon name="search" />
             <span>Search</span>
@@ -1227,10 +1366,28 @@ export default function CommandCenter() {
               }}
             >
               <Icon name="bell" />
-              {badge > 0 && <em>{badge}</em>}
+              {bellCount > 0 && <em>{bellCount}</em>}
             </button>
             {bellOpen && (
               <div className="bell-pop bell-list">
+                {pendingRuns.length > 0 && (
+                  <>
+                    <strong>Pre-alerts waiting for an answer</strong>
+                    {pendingRuns.map((run) => (
+                      <button
+                        key={run.id}
+                        type="button"
+                        onClick={() => {
+                          setBellOpen(false);
+                          chooseNav("ambulances");
+                        }}
+                      >
+                        <b>ESI {run.esi} · {run.unit}</b>
+                        <span>{run.complaint_label} · ETA {countdown(run.eta_seconds)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
                 <strong>Open incidents</strong>
                 {openIncidents.length === 0 ? (
                   <p>No bed is blocked by an incident.</p>
@@ -1252,7 +1409,6 @@ export default function CommandCenter() {
               </div>
             )}
           </div>
-          <LoginButton />
           <div className="ab-clock">
             <strong>{clock}</strong>
           </div>
@@ -1313,32 +1469,45 @@ export default function CommandCenter() {
               floors={floors}
               outlook={outlook}
               insights={insights}
-              history={history}
               briefing={{ ...briefing, text: briefingText }}
               actions={actions}
               busy={surgeBusy}
               onRefreshBriefing={refreshBriefing}
+              capacity={homeCapacity}
+              incoming={incoming}
+              emsSummary={emsSummary}
+              emsStatus={emsStatus}
+              calledPhysicians={calledPhysicians}
+              onCallPhysicians={callPhysicians}
+              onOpenAmbulances={() => chooseNav("ambulances")}
               onOpenFloor={goToFloor}
               onOpenRoom={openRoomById}
               onRunAction={runRailAction}
               onOpenTab={chooseNav}
             />
           )}
-          {nav === "flow" && (
-            <FlowTab insights={insights} movements={movements} deptLabels={deptLabels} now={syncTick} onOpenRoom={openRoomById} />
-          )}
-          {nav === "staff" && (
-            <StaffTab
-              ops={ops}
-              roster={roster}
-              calledPhysicians={calledPhysicians}
-              divertedCount={divertedCount}
-              edPatients={edPatients}
+          {nav === "ambulances" && (
+            <AmbulancesTab
+              runs={emsRuns}
+              summary={emsSummary}
+              beds={allBeds}
+              hospitals={region}
               busy={surgeBusy}
-              onCallPhysicians={callPhysicians}
-              onDivert={divertPatients}
+              onAccept={acceptRun}
+              onDivert={divertRun}
+              onHandoff={handoffRun}
+              onOpenRoom={openRoomById}
             />
           )}
+          {nav === "network" && (
+            <NetworkTab
+              onSent={(run) => {
+                setToast(`${run.code} sent to ${run.destination}.`);
+                if (run.destination === "Tiger Memorial") setEmsRuns((current) => [...current, run]);
+              }}
+            />
+          )}
+          {nav === "data" && <OpenDataTab />}
           {nav === "ops" && (
             <OpsTab
               beds={allBeds}
@@ -1484,6 +1653,8 @@ export default function CommandCenter() {
               floor={floor}
               deptFilter="all"
               spaceFilter={liveMap ? spaceFilter : "all"}
+              emsByRoom={emsByRoom}
+              emsBayActive={emsBayActive}
               layer="all"
               selectedId={selectedId}
               showBeds={showBeds}
@@ -1593,6 +1764,10 @@ export default function CommandCenter() {
                     movements={movements}
                     incidents={openIncidents.filter((item) => item.room_id === selected.id)}
                     queuePlace={queuePlace.get(selected.id) || null}
+                    emsRun={incoming.find((run) => run.bed_id === selected.id) || null}
+                    busy={surgeBusy}
+                    onAcceptRun={acceptRun}
+                    onHandoffRun={handoffRun}
                     onOpenRoom={openRoomById}
                     onClose={() => setSelectedId(null)}
                   />
@@ -1694,6 +1869,7 @@ function initials(name) {
 function unitMix(beds) {
   const mix = { critical: 0, occupied: 0, turnover: 0, open: 0 };
   for (const bed of beds) {
+    if (!bed.status) continue;
     if (bed.status === "critical") mix.critical += 1;
     else if (bed.status === "warning" || bed.status === "normal") mix.occupied += 1;
     else if (bed.status === "available") mix.open += 1;
@@ -1767,6 +1943,10 @@ function RoomCard({
   movements = [],
   incidents = [],
   queuePlace = null,
+  emsRun = null,
+  busy = "",
+  onAcceptRun,
+  onHandoffRun,
   onOpenRoom,
   onClose,
 }) {
@@ -1806,12 +1986,28 @@ function RoomCard({
         </div>
       </div>
 
-      <div className="bed-sketch">
-        <img
-          src={roomVisualSrc(room)}
-          alt={`${room.type} interior`}
-        />
-      </div>
+      {emsRun ? (
+        <div className="rc-ems" style={{ "--esi": ESI[emsRun.esi]?.color, "--esi-soft": ESI[emsRun.esi]?.soft }}>
+          <div className="rc-ems-top">
+            <span className="esi-badge" style={{ "--esi": ESI[emsRun.esi]?.color, "--esi-soft": ESI[emsRun.esi]?.soft }}>ESI {emsRun.esi}</span>
+            <strong>{emsRun.status === "arrived" ? "Ambulance at the EMS bay" : "Ambulance on the way"}</strong>
+            <b>{emsRun.status === "arrived" ? "Here" : countdown(emsRun.eta_seconds)}</b>
+          </div>
+          <p>{emsRun.unit} · {emsRun.complaint_label} · {emsRun.summary}</p>
+          <div className="rc-ems-needs">{emsRun.needs.map((need) => <span key={need}>{need}</span>)}</div>
+          {emsRun.status === "arrived" && (
+            <button type="button" className="amb-accept" disabled={Boolean(busy)} onClick={() => onHandoffRun?.(emsRun)}>
+              Handoff complete → {room.id}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bed-id">
+          <span className="mono">Location/{room.id}</span>
+          <span>{room.type}</span>
+          <span>{floor.code}</span>
+        </div>
+      )}
 
       <div className="tabs">
         {ROOM_TABS.map((item) => (

@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
         input: {
           landing: resolve(__dirname, "index.html"),
           app: resolve(__dirname, "app.html"),
+          public: resolve(__dirname, "public.html"),
         },
       },
     },

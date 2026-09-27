@@ -4,16 +4,21 @@ import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db import get_db
 from app.api.routes.insights import insights
+from app import ems
+from app.models import AmbulanceRun
 from app.ops_snapshot import build_ops
 
 router = APIRouter()
 
-SYSTEM = """You are the operations assistant for the president of Tiger Memorial Hospital.
+SYSTEM = """You are the operations assistant for Tiger Memorial Hospital and its regional ambulance network.
+You help hospital staff and ambulance crews: incoming ambulances, where to send a patient, and which beds are open in every unit.
+When asked where to send a patient, use "regional_availability" and "ems_routing_rules": name one hospital and say why.
 Answer only from the operations snapshot in this prompt.
 If the snapshot does not contain the fact, say it is not in the census.
 Do not invent patients, staff, beds, times, or vital signs.
@@ -101,6 +106,33 @@ def _gemini(system_text: str, contents: list[dict], max_tokens: int) -> str:
     raise HTTPException(status_code=502, detail=last_error)
 
 
+def _ems_context(db: Session) -> dict:
+    """Ambulances on the way and every hospital's capacity, without patient names."""
+    rows = db.scalars(select(AmbulanceRun).where(AmbulanceRun.status.in_(ems.ACTIVE)).limit(20)).all()
+    runs = [ems.run_payload(run) for run in rows]
+    return {
+        "ambulance_status": ems.facility(db).ems_status,
+        "ambulances_incoming": [
+            {key: run[key] for key in ("code", "unit", "esi", "complaint_label", "status", "bed_id", "eta_seconds", "target")}
+            for run in runs
+        ],
+        "ambulance_kpis": ems.summary(db),
+        "regional_availability": [
+            {
+                "hospital": row["name"],
+                "ems_status": row["ems_status"],
+                "services": row["services"],
+                "open_beds": {unit: data["open"] for unit, data in row["units"].items()},
+                "ed_wait_min": row["ed_wait_min"],
+            }
+            for row in ems.network(db)
+        ],
+        "ems_routing_rules": "Trauma ESI 1-3 needs a trauma center (Level I preferred for ESI 1-2); stroke needs a stroke "
+        "center with CT; STEMI ESI 1-2 needs a cath lab; ESI 1-2 respiratory, stroke, cardiac or trauma needs an open ICU bed; "
+        "hospitals on diversion are skipped except ESI 1 to the nearest capable hospital.",
+    }
+
+
 class ChatTurn(BaseModel):
     role: str
     content: str = Field(max_length=2000)
@@ -143,6 +175,7 @@ def briefing(db: Session = Depends(get_db)):
         "flow_last_2h": trends["totals"],
         "bed_turnover_minutes": trends["turnover"],
         "length_of_stay_minutes": trends["los"],
+        **_ems_context(db),
     }
     text = _gemini(
         BRIEFING + "\n\nSnapshot:\n" + json.dumps(brief, default=str),
@@ -183,6 +216,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
         "beds": snapshot.get("beds", [])[:40],
         "units": snapshot["units"],
         "pending": snapshot["pending"][:20],
+        **_ems_context(db),
     }
     contents = [
         {

@@ -2,14 +2,17 @@ import { Sparkline } from "./charts";
 
 const OCCUPIED = new Set(["critical", "warning", "normal"]);
 
+// Beds the live census has not reported yet have no status and are left out.
 export function bedMix(beds) {
   const mix = { occupied: 0, open: 0, turnover: 0 };
+  let total = 0;
   for (const bed of beds) {
+    if (!bed.status) continue;
+    total += 1;
     if (OCCUPIED.has(bed.status)) mix.occupied += 1;
     else if (bed.status === "available") mix.open += 1;
     else mix.turnover += 1;
   }
-  const total = beds.length;
   return { ...mix, total, pct: total ? Math.round((mix.occupied / total) * 100) : 0 };
 }
 

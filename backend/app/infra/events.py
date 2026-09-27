@@ -51,6 +51,16 @@ SYSTEMS = (
         "description": "Soiled pickup, laundry and clean linen delivery to each bed.",
     },
     {
+        "id": "ems",
+        "name": "EMS & ambulance network",
+        "category": "Network",
+        "protocol": "NEMSIS 3.5 · REST",
+        "direction": "bidirectional",
+        "mode": "emulated",
+        "color": "#f87171",
+        "description": "Ambulance pre-alerts in, acceptance or diversion back to the crew.",
+    },
+    {
         "id": "workforce",
         "name": "Workforce & on-call",
         "category": "People",
@@ -156,6 +166,12 @@ EVENT_TYPES = (
     ("evs.clean_assigned", "Housekeeper assigned to a bed"),
     ("linen.delivered", "Clean linen delivered to a bed"),
     ("staff.called_in", "On-call physicians brought on duty"),
+    ("ems.prealert", "Ambulance pre-alert received"),
+    ("ems.accepted", "Ambulance accepted and a bed held"),
+    ("ems.diverted", "Ambulance diverted to another hospital"),
+    ("ems.arrived", "Ambulance arrived at the EMS bay"),
+    ("hospital.diverting", "Hospital went on ambulance diversion"),
+    ("hospital.accepting", "Hospital accepting ambulances again"),
     ("transfer.batch", "Group transfer to a partner hospital"),
     ("transfer.incoming_notice", "Incoming patients announced"),
     ("platform.test", "Test event sent from the platform"),
@@ -179,6 +195,20 @@ def classify(name: str | None, message: str | None, kind: str | None, room_id: s
     text = message or ""
     person = None if (name or "") in INTERNAL_NAMES else name
 
+    if kind == "ems":
+        if " pre-alert: " in text:
+            return _event("ems.prealert", "ems", None)
+        if " accepted to " in text:
+            return _event("ems.accepted", "ems", None)
+        if " diverted to " in text:
+            return _event("ems.diverted", "ems", None)
+        if " arrived at EMS bay" in text:
+            return _event("ems.arrived", "ems", None)
+        if "is now diverting" in text:
+            return _event("hospital.diverting", "command-center", None)
+        if "accepting ambulances" in text:
+            return _event("hospital.accepting", "command-center", None)
+        return _event("hospital.event", "ems", None)
     if kind == "admit":
         if name == "Command":
             return _event("transfer.incoming_notice", "transfer-center", None)

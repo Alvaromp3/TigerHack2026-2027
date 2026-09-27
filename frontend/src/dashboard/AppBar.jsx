@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 export const TABS = [
-  { id: "overview", label: "Overview", icon: "layers" },
+  { id: "overview", label: "Overview", icon: "gauge" },
   { id: "live", label: "Live Map", icon: "map" },
-  { id: "flow", label: "Patient Flow", icon: "flow" },
-  { id: "staff", label: "Staff", icon: "people" },
+  { id: "ambulances", label: "Ambulances", icon: "ambulance" },
+  { id: "network", label: "Network", icon: "network" },
   { id: "ops", label: "Operations", icon: "tiles" },
+  { id: "data", label: "Open Data", icon: "layers" },
 ];
 
 // Same 20px, 1.7-stroke glyphs as the landing page nav pill.
@@ -20,6 +21,35 @@ function TabIcon({ name }) {
     strokeLinejoin: "round",
     "aria-hidden": true,
   };
+  if (name === "gauge") {
+    return (
+      <svg {...common}>
+        <path d="M3.2 14.5a7 7 0 1 1 13.6 0" />
+        <path d="m10 11 3.2-3.4" />
+        <circle cx="10" cy="11.2" r="1.1" />
+      </svg>
+    );
+  }
+  if (name === "ambulance") {
+    return (
+      <svg {...common}>
+        <path d="M1.8 14.2V6.4h9.4v7.8M11.2 8.6h3.3l3.3 3.2v2.4h-1.4M5.4 14.2h5.2" />
+        <circle cx="4.2" cy="14.6" r="1.5" />
+        <circle cx="14.4" cy="14.6" r="1.5" />
+        <path d="M6.5 8.2v3.4M4.8 9.9h3.4" />
+      </svg>
+    );
+  }
+  if (name === "network") {
+    return (
+      <svg {...common}>
+        <circle cx="10" cy="4.2" r="2" />
+        <circle cx="4" cy="15.4" r="2" />
+        <circle cx="16" cy="15.4" r="2" />
+        <path d="M9 5.9 5 13.7M11 5.9l4 7.8M6 15.4h8" />
+      </svg>
+    );
+  }
   if (name === "layers") {
     return (
       <svg {...common}>
@@ -33,23 +63,6 @@ function TabIcon({ name }) {
       <svg {...common}>
         <path d="M2.5 5.2 7 3.2l6 2.3 4.5-2v11.3l-4.5 2-6-2.3-4.5 2V5.2Z" />
         <path d="M7 3.2v11.3M13 5.5v11.3" />
-      </svg>
-    );
-  }
-  if (name === "flow") {
-    return (
-      <svg {...common}>
-        <path d="M3 17V3M3 17h14" />
-        <path d="M6.6 17v-4M10.5 17V8M14.4 17v-6" />
-      </svg>
-    );
-  }
-  if (name === "people") {
-    return (
-      <svg {...common}>
-        <circle cx="8" cy="7.4" r="2.7" />
-        <path d="M3 17v-.7A3.6 3.6 0 0 1 6.6 12.7h2.8A3.6 3.6 0 0 1 13 16.3V17" />
-        <path d="M14.4 5.3a2.6 2.6 0 0 1 0 5.1M18 17v-.6a3.4 3.4 0 0 0-2.5-3.3" />
       </svg>
     );
   }
@@ -100,7 +113,8 @@ export function AppNav({ active, onChange, badges = {}, live }) {
             <TabIcon name={tab.icon} />
             <span className="ab-label">{tab.label}</span>
             {tab.id === "live" && live && <i className="ab-live" aria-label="Live" />}
-            {badges[tab.id] > 0 && <em className="ab-badge">{badges[tab.id]}</em>}
+            {tab.id === "ambulances" && badges.ambulances > 0 && <em className="ab-badge is-alert">{badges.ambulances}</em>}
+            {tab.id !== "ambulances" && badges[tab.id] > 0 && <em className="ab-badge">{badges[tab.id]}</em>}
           </button>
         ))}
       </div>

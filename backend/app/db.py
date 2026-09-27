@@ -136,10 +136,10 @@ def init_db():
         seed_staff_if_empty(db)
         seed_housekeepers_if_empty(db)
         seed_linen_aides_if_empty(db)
-        from app.sim import ensure_cleaning_queue
-
-        ensure_cleaning_queue(db)
         db.commit()
+        from app.sim import repair_census
+
+        repair_census(db)
 
 
 def seed_staff_if_empty(db):

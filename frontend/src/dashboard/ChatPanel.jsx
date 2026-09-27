@@ -2,9 +2,9 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { apiUrl } from "../api/client";
 
 const PROMPTS = [
-  "Where do I put a critical trauma patient?",
-  "What is blocking beds right now?",
-  "Who can clean a room?",
+  "Which ambulances are coming, and are their beds ready?",
+  "Where should an ESI 2 stroke from the East zone go?",
+  "Which units have open beds right now?",
 ];
 
 const ROOM_TOKEN = /\b[A-Z]{2,5}-[A-Z0-9]{1,3}\b/g;
