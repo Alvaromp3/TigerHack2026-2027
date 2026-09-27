@@ -40,7 +40,7 @@ CALLBACKS = (
     ("Dr. Marcus Hale", "physician", "icu", "Critical care", "callback", "4110"),
     ("Dr. Priya Nair", "physician", "surg", "Trauma surgery", "callback", "3110"),
 )
-CLEAN_TICKS = {"stat": 2, "standard": 4, "terminal": 8}
+CLEAN_TICKS = {"stat": 1, "standard": 1, "terminal": 1}
 LINEN_STAGE_TICKS = {"pickup": 1, "wash": 2, "deliver": 1}
 LINEN_NEXT = {"pickup": "wash", "wash": "deliver"}
 LINEN_ACTIVE = ("pickup", "wash", "deliver")
@@ -825,29 +825,26 @@ def repair_census(db: Session) -> list[str]:
 
 
 def _advance_cleaning(db: Session):
-    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+    """Every bed in turnover loses one tick, whether or not a housekeeper is on it."""
     finished = []
-    for keeper in keepers:
-        if not keeper.room_id:
+    rooms = list(db.scalars(select(Room).where(Room.status == "cleaning")).all())
+    for room in rooms:
+        if room.linen_stage != "ready":
+            room.linen_stage = "ready"
+            room.linen_ticks = 0
+        if room.ticks_left is None or room.ticks_left > 1:
+            room.ticks_left = 1
+        room.ticks_left -= 1
+        if room.ticks_left > 0:
             continue
-        room = db.get(Room, keeper.room_id)
-        if room is None or room.status != "cleaning":
+        for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
             keeper.room_id = None
-            continue
-        room.ticks_left = (room.ticks_left or 1) - 1
-        if room.ticks_left <= 0:
-            opened = _finish_clean(db, room, keeper)
-            if opened:
-                finished.append(opened)
+        opened = _try_open(db, room, "Housekeeping")
+        if opened:
+            finished.append(opened)
     if not finished:
         return None
     return ", ".join(finished)
-
-
-def _finish_clean(db: Session, room: Room, keeper: Housekeeper):
-    keeper.room_id = None
-    room.ticks_left = 0
-    return _try_open(db, room, keeper.name)
 
 
 def _advance_linen(db: Session):
@@ -917,8 +914,8 @@ def _release_linen(db: Session, room: Room):
 
 def _start_linen(db: Session, room: Room):
     state = db.get(HospitalState, 1)
-    room.linen_stage = "pickup"
-    room.linen_ticks = LINEN_STAGE_TICKS["pickup"]
+    room.linen_stage = "ready"
+    room.linen_ticks = 0
     if room.queued_tick is None:
         room.queued_tick = state.tick_count if state is not None else 0
 
