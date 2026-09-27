@@ -40,7 +40,8 @@ CALLBACKS = (
     ("Dr. Marcus Hale", "physician", "icu", "Critical care", "callback", "4110"),
     ("Dr. Priya Nair", "physician", "surg", "Trauma surgery", "callback", "3110"),
 )
-CLEAN_TICKS = {"stat": 1, "standard": 1, "terminal": 1}
+# Work left for one housekeeper. A larger crew removes more of it each tick.
+CLEAN_TICKS = {"stat": 2, "standard": 4, "terminal": 8}
 LINEN_STAGE_TICKS = {"pickup": 1, "wash": 2, "deliver": 1}
 LINEN_NEXT = {"pickup": "wash", "wash": "deliver"}
 LINEN_ACTIVE = ("pickup", "wash", "deliver")
@@ -49,14 +50,14 @@ ISOLATION_MARKERS = ("sepsis", "c. diff", "c.diff", "covid", "mrsa", "tb", "tube
 ED_BED_FLOOR = 4
 # One ICU bed stays open so the unit can be tight without sitting at zero.
 ICU_BED_FLOOR = 1
-# Occupied share the board steers toward. A clean still finishes in one tick, so a
-# bed does not stay "in use" just because turnover is slow. Below the low end the
-# census fills one bed; above the high end it sends one patient on. The middle is
-# the resting point, not an empty house and not a full one.
+# Occupied share the board steers toward. Below the low end the census fills one
+# bed; above the high end it sends one patient on. The cap is the demo line:
+# a unit that crosses it opens one bed, so the board never sits above 95%.
 ED_LOW = 0.55
 ICU_LOW, ICU_HIGH = 0.45, 0.72
 INPATIENT_LOW, INPATIENT_HIGH = 0.48, 0.68
 OR_LOW = 0.50
+OCCUPANCY_CAP = 0.90
 AMBULANCE_ZONES = (("F1", "ED"), ("F1", "FAST"), ("F3", "ER"))
 
 
@@ -369,11 +370,15 @@ def _icu_opening(db: Session) -> int:
 
 
 def _hold_capacity(db: Session) -> str | None:
-    """Keep a surge bed free, then one step back toward the middle of each unit."""
+    """Keep a surge bed free, stay under the demo cap, then step toward the middle."""
     notes = [note for note in (_open_emergency_bed(db), _open_icu_bed(db)) if note]
-    steered = _steer_midpoint(db)
-    if steered:
-        notes.append(steered)
+    capped = _relieve_ceiling(db)
+    if capped:
+        notes.append(capped)
+    else:
+        steered = _steer_midpoint(db)
+        if steered:
+            notes.append(steered)
     return " · ".join(notes) or None
 
 
@@ -960,22 +965,43 @@ def repair_census(db: Session) -> list[str]:
     return fixed
 
 
+def _worker_step(count: int) -> int:
+    """Ticks one assigned worker removes this cycle. More people, a faster job."""
+    if count >= 5:
+        return 4
+    if count >= 3:
+        return 2
+    return 1
+
+
 def _advance_cleaning(db: Session):
-    """Every bed in turnover loses one tick, whether or not a housekeeper is on it."""
+    """Only a bed with a housekeeper on it moves. A bigger crew finishes it sooner."""
+    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+    step = _worker_step(len(keepers))
+    by_room: dict[str, list[Housekeeper]] = {}
+    for keeper in keepers:
+        if keeper.room_id:
+            by_room.setdefault(keeper.room_id, []).append(keeper)
     finished = []
     rooms = list(db.scalars(select(Room).where(Room.status == "cleaning")).all())
     for room in rooms:
-        if room.linen_stage != "ready":
-            room.linen_stage = "ready"
-            room.linen_ticks = 0
-        if room.ticks_left is None or room.ticks_left > 1:
-            room.ticks_left = 1
-        room.ticks_left -= 1
+        if (room.ticks_left or 0) <= 0 and room.linen_stage == "ready":
+            opened = _try_open(db, room, "Housekeeping")
+            if opened:
+                finished.append(opened)
+            continue
+        crew = by_room.get(room.id)
+        if not crew:
+            continue
+        if room.ticks_left is None:
+            room.ticks_left = CLEAN_TICKS.get(room.clean_type or "standard", CLEAN_TICKS["standard"])
+        room.ticks_left -= step
         if room.ticks_left > 0:
             continue
-        for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+        room.ticks_left = 0
+        for keeper in crew:
             keeper.room_id = None
-        opened = _try_open(db, room, "Housekeeping")
+        opened = _try_open(db, room, crew[0].name)
         if opened:
             finished.append(opened)
     if not finished:
@@ -984,7 +1010,9 @@ def _advance_cleaning(db: Session):
 
 
 def _advance_linen(db: Session):
+    """Linen moves only while an aide is on the bed. More aides, a faster cycle."""
     aides = list(db.scalars(select(LinenAide).order_by(LinenAide.id)).all())
+    step = _worker_step(len(aides))
     delivered = []
     for aide in aides:
         if not aide.room_id:
@@ -993,16 +1021,19 @@ def _advance_linen(db: Session):
         if room is None or room.status != "cleaning" or room.linen_stage not in LINEN_ACTIVE:
             aide.room_id = None
             continue
-        room.linen_ticks = (room.linen_ticks or 1) - 1
-        if room.linen_ticks > 0:
-            continue
-        nxt = LINEN_NEXT.get(room.linen_stage)
-        if nxt:
+        room.linen_ticks = (room.linen_ticks or 1) - step
+        guard = 0
+        while room.linen_ticks <= 0 and guard < 4:
+            guard += 1
+            nxt = LINEN_NEXT.get(room.linen_stage)
+            if not nxt:
+                room.linen_stage = "ready"
+                room.linen_ticks = 0
+                break
             room.linen_stage = nxt
-            room.linen_ticks = LINEN_STAGE_TICKS[nxt]
+            room.linen_ticks += LINEN_STAGE_TICKS[nxt]
+        if room.linen_stage != "ready":
             continue
-        room.linen_stage = "ready"
-        room.linen_ticks = 0
         aide.room_id = None
         _log(db, "Linen", f"{room.id} clean linen delivered", room.id, "clean")
         opened = _try_open(db, room, aide.name)
@@ -1050,10 +1081,50 @@ def _release_linen(db: Session, room: Room):
 
 def _start_linen(db: Session, room: Room):
     state = db.get(HospitalState, 1)
-    room.linen_stage = "ready"
-    room.linen_ticks = 0
+    if room.linen_stage not in LINEN_ACTIVE:
+        room.linen_stage = "pickup"
+        room.linen_ticks = LINEN_STAGE_TICKS["pickup"]
     if room.queued_tick is None:
         room.queued_tick = state.tick_count if state is not None else 0
+
+
+def _unit_of(room: Room) -> str | None:
+    if room.kind == "or":
+        return "or"
+    if room.dept == "icu":
+        return "icu"
+    if room.dept in ("med", "surgward"):
+        return "inpatient"
+    if room.dept == "ed":
+        return "ed"
+    return None
+
+
+def _relieve_ceiling(db: Session) -> str | None:
+    """Open one bed when a unit crosses 90%, so the demo cannot rest above 95%."""
+    hot = [unit for unit in ("inpatient", "icu", "ed", "or") if _unit_share(db, unit) > OCCUPANCY_CAP]
+    if not hot:
+        return None
+    rooms = [
+        room for room in db.scalars(select(Room).where(Room.status == "cleaning")).all()
+        if _unit_of(room) in hot
+    ]
+    if not rooms:
+        if "inpatient" in hot:
+            return _discharge_one(db)
+        if "icu" in hot:
+            return _stepdown_one(db)
+        return None
+    rooms.sort(key=lambda room: (room.ticks_left if room.ticks_left is not None else 99, room.queued_tick or 0))
+    room = rooms[0]
+    room.ticks_left = 0
+    room.linen_stage = "ready"
+    room.linen_ticks = 0
+    for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+        keeper.room_id = None
+    for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
+        aide.room_id = None
+    return _try_open(db, room, "Housekeeping")
 
 
 def _assign_housekeepers(db: Session):
