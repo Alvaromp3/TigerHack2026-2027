@@ -1,11 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import FlowEvent, HospitalState, Housekeeper, LinenAide, Room, Staff, Transfer
-from app.sim import call_physicians, declare_incoming, divert_overflow, reset_demo
 
 router = APIRouter()
 
@@ -159,10 +157,6 @@ def staff(db: Session = Depends(get_db)):
     }
 
 
-class NoticeIn(BaseModel):
-    notice: str = Field(min_length=1, max_length=240)
-
-
 def _state_payload(db: Session, state: HospitalState | None):
     return {
         "surge": bool(state and state.surge),
@@ -171,43 +165,3 @@ def _state_payload(db: Session, state: HospitalState | None):
         "diverted_count": state.diverted_count if state else 0,
         "rooms": _rooms(db),
     }
-
-
-@router.post("/surge")
-def surge(body: NoticeIn, db: Session = Depends(get_db)):
-    try:
-        admitted = declare_incoming(db, body.notice)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    state = db.get(HospitalState, 1)
-    return {"admitted": admitted, **_state_payload(db, state)}
-
-
-@router.post("/surge/physicians")
-def physicians(db: Session = Depends(get_db)):
-    try:
-        called = call_physicians(db)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    state = db.get(HospitalState, 1)
-    return {"called": called, **_state_payload(db, state)}
-
-
-@router.post("/surge/divert")
-def divert(db: Session = Depends(get_db)):
-    try:
-        diverted = divert_overflow(db)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    state = db.get(HospitalState, 1)
-    return {"diverted": diverted, **_state_payload(db, state)}
-
-
-@router.post("/demo/reset")
-def demo_reset(db: Session = Depends(get_db)):
-    try:
-        room_id = reset_demo(db)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    state = db.get(HospitalState, 1)
-    return {"room_id": room_id, **_state_payload(db, state)}

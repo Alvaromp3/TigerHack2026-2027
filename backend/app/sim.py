@@ -26,7 +26,6 @@ log = logging.getLogger(__name__)
 write_lock = threading.Lock()
 TICK_SECONDS = 9
 SURGE_TICK_SECONDS = 2
-WAVE_SIZE = 4
 DIVERT_BATCH = 6
 OUTSIDE_HOSPITAL = "County General"
 DEMO_ROOM = "ED-06"
@@ -67,28 +66,6 @@ def tick_seconds(db: Session) -> int:
     if state is not None and state.surge:
         return SURGE_TICK_SECONDS
     return TICK_SECONDS
-
-
-def declare_incoming(db: Session, notice: str) -> int:
-    text = (notice or "").strip()
-    if not text:
-        raise ValueError("Write what is coming in.")
-    with write_lock:
-        state = db.get(HospitalState, 1)
-        if state is None:
-            raise ValueError("The hospital census is not ready.")
-        if state.surge:
-            raise ValueError("An incoming notice is already active.")
-        state.surge = True
-        state.incoming_notice = text[:240]
-        landed = 0
-        for _ in range(WAVE_SIZE):
-            if not _admit_critical(db):
-                break
-            landed += 1
-        _log(db, "Command", f"Incoming: {state.incoming_notice}", None, "admit")
-        db.commit()
-        return landed
 
 
 def call_physicians(db: Session) -> int:

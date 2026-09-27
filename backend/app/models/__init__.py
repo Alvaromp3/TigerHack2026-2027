@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -137,3 +137,60 @@ class HospitalState(Base):
     called_physicians: Mapped[int] = mapped_column(Integer, default=0)
     diverted_count: Mapped[int] = mapped_column(Integer, default=0)
     demo_room_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
+class WebhookSubscription(Base):
+    """An outside system that wants hospital events pushed to it."""
+
+    __tablename__ = "webhook_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(400))
+    description: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    secret: Mapped[str] = mapped_column(String(80))
+    # Comma-separated event types; "bed.*" style wildcards allowed; empty means every event.
+    event_types: Mapped[str] = mapped_column(String(400), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    cursor_event_id: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, index=True)
+    event_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SandboxMessage(Base):
+    """What the built-in webhook receiver got, so a demo can show delivery end to end."""
+
+    __tablename__ = "sandbox_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscription_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    event_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    signature_valid: Mapped[bool] = mapped_column(Boolean, default=False)
+    body: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditEntry(Base):
+    __tablename__ = "audit_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    target: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    detail: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
