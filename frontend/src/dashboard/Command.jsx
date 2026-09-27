@@ -47,7 +47,13 @@ function rowsFor(ops, filter) {
 export default function Command({
   ops,
   surgeOn,
-  onDeclareSurge,
+  incomingNotice,
+  calledPhysicians,
+  divertedCount,
+  onDeclareIncoming,
+  onCallPhysicians,
+  onDivert,
+  onResetDemo,
   onOpenItem,
   onAssign,
   onComplete,
@@ -56,6 +62,7 @@ export default function Command({
 }) {
   const counts = ops?.counts || { usable: 0, transfers: 0, cleans: 0, incidents: 0 };
   const [filter, setFilter] = useState("all");
+  const [draft, setDraft] = useState("");
   const items = rowsFor(ops, filter);
   const freeKeepers = (keepers || []).filter((keeper) => !keeper.room_id);
 
@@ -68,11 +75,45 @@ export default function Command({
           <p>What is stopped, and what is still usable. Same census as the map.</p>
         </div>
         <div className="reports-tools">
-          <button type="button" onClick={onDeclareSurge} disabled={surgeOn}>
-            {surgeOn ? "Surge declared" : "Declare surge"}
-          </button>
+          <button type="button" className="is-quiet" onClick={onResetDemo}>Reset demo</button>
         </div>
       </header>
+
+      <form
+        className="incoming-bar"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const text = draft.trim();
+          if (!text || surgeOn) return;
+          onDeclareIncoming(text);
+          setDraft("");
+        }}
+      >
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          maxLength={240}
+          placeholder="What is coming in?"
+          aria-label="Incoming event"
+          disabled={Boolean(incomingNotice)}
+        />
+        <button type="submit" disabled={Boolean(incomingNotice) || !draft.trim()}>Declare incoming</button>
+        {incomingNotice && (
+          <>
+            <button type="button" onClick={onCallPhysicians} disabled={calledPhysicians > 0}>
+              {calledPhysicians > 0 ? `${calledPhysicians} physicians called` : "Call in physicians"}
+            </button>
+            <button type="button" onClick={onDivert}>Divert to another hospital</button>
+          </>
+        )}
+      </form>
+
+      {surgeOn && incomingNotice && (
+        <p className="incoming-banner">{incomingNotice}</p>
+      )}
+      {surgeOn && divertedCount > 0 && (
+        <p className="command-note">{divertedCount} patients diverted to County General.</p>
+      )}
 
       {notice && <p className="command-note">{notice}</p>}
 

@@ -1,10 +1,10 @@
 export default function ElevatorPanel({ floors, currentId, onSelect, onClose }) {
   return (
-    <div className="cab" role="dialog" aria-label="Elevator">
+    <div className="cab is-dock" role="dialog" aria-label="Elevator">
       <div className="cab-head">
         <div>
           <strong>Elevator</strong>
-          <p>Patient cab · stretcher clear 2.10 × 2.75 m</p>
+          <p>Pick a floor. The map moves with the cab.</p>
         </div>
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Close elevator">
           ×

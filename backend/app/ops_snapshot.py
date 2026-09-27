@@ -38,6 +38,10 @@ def build_ops(db: Session) -> dict:
 
     return {
         "surge": bool(state and state.surge),
+        "incoming_notice": state.incoming_notice if state is not None else None,
+        "called_physicians": state.called_physicians if state is not None else 0,
+        "diverted_count": state.diverted_count if state is not None else 0,
+        "demo_room_id": state.demo_room_id if state is not None else None,
         "tick": tick,
         "counts": {
             "usable": len(usable),
@@ -59,6 +63,7 @@ def build_ops(db: Session) -> dict:
         "staff": [_staff_row(person, census) for person in staff],
         "units": _unit_summary(census, staff),
         "pending": _pending(census, transfers, now),
+        "beds": _bed_facts(census),
     }
 
 
@@ -94,6 +99,8 @@ def _cleans(rooms, keeper_by_room, tick: int) -> list[dict]:
             reason = "Linen is still out. The bed stays closed."
         else:
             reason = "No housekeeper assigned."
+        if room.hold_for:
+            reason = f"{room.hold_for} is waiting on this bed. {reason}"
         rows.append({
             "id": f"clean:{room.id}",
             "kind": "clean",
@@ -132,7 +139,7 @@ def _incident_items(incidents, now: datetime) -> list[dict]:
 def _transfer_items(transfers, now: datetime) -> list[dict]:
     rows = []
     for transfer in transfers:
-        label = "ICU full" if transfer.reason == "icu_full" else "ORs full"
+        label = _transfer_reason(transfer.reason)
         rows.append({
             "id": f"transfer:{transfer.id}",
             "kind": "transfer",
@@ -297,7 +304,7 @@ def _pending(rooms, transfers, now: datetime) -> list[dict]:
                 "reason": "Intensive Care has no open bed.",
             })
     for transfer in transfers:
-        label = "ICU full" if transfer.reason == "icu_full" else "ORs full"
+        label = _transfer_reason(transfer.reason)
         rows.append({
             "id": f"transfer:{transfer.id}",
             "kind": "transfer",
@@ -308,6 +315,40 @@ def _pending(rooms, transfers, now: datetime) -> list[dict]:
             "age_seconds": _age(transfer.created_at, now),
         })
     return rows
+
+
+def _bed_facts(rooms) -> list[dict]:
+    rows = []
+    for room in rooms:
+        patient = room.patient
+        if patient is None:
+            continue
+        pressure = None
+        if patient.systolic is not None and patient.diastolic is not None:
+            pressure = f"{patient.systolic}/{patient.diastolic}"
+        rows.append({
+            "room_id": room.id,
+            "patient": patient.name,
+            "age": patient.age,
+            "complaint": patient.chief_complaint,
+            "diagnosis": patient.diagnosis,
+            "physician": patient.physician,
+            "nurse": patient.nurse,
+            "heart_rate": patient.heart_rate,
+            "blood_pressure": pressure,
+            "spo2": patient.spo2,
+            "respiratory_rate": patient.respiratory_rate,
+            "temperature": None if patient.temperature is None else patient.temperature / 10,
+        })
+    return rows
+
+
+def _transfer_reason(reason: str) -> str:
+    if reason == "icu_full":
+        return "ICU full"
+    if reason == "incoming":
+        return "Sent to another hospital"
+    return "ORs full"
 
 
 def db_patients_needing_or(rooms) -> list[Room]:

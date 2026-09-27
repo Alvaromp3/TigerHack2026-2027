@@ -18,12 +18,25 @@ from app.models import (
     LinenAide,
     Patient,
     Room,
+    Staff,
     Transfer,
 )
 
 log = logging.getLogger(__name__)
 write_lock = threading.Lock()
 TICK_SECONDS = 9
+SURGE_TICK_SECONDS = 2
+WAVE_SIZE = 4
+DIVERT_BATCH = 6
+OUTSIDE_HOSPITAL = "County General"
+DEMO_ROOM = "ED-06"
+DEMO_WAITING = "Jordan Hale"
+CALLBACKS = (
+    ("Dr. Helen Cho", "physician", "surg", "Orthopedics", "night", "3104"),
+    ("Dr. Sara Nguyen", "physician", "ed", "Emergency medicine", "callback", "1110"),
+    ("Dr. Marcus Hale", "physician", "icu", "Critical care", "callback", "4110"),
+    ("Dr. Priya Nair", "physician", "surg", "Trauma surgery", "callback", "3110"),
+)
 CLEAN_TICKS = {"stat": 2, "standard": 4, "terminal": 8}
 LINEN_STAGE_TICKS = {"pickup": 1, "wash": 2, "deliver": 1}
 LINEN_NEXT = {"pickup": "wash", "wash": "deliver"}
@@ -49,46 +62,131 @@ def tick(db: Session):
         return action or cleaned
 
 
-def declare_surge(db: Session) -> int:
+def tick_seconds(db: Session) -> int:
+    state = db.get(HospitalState, 1)
+    if state is not None and state.surge:
+        return SURGE_TICK_SECONDS
+    return TICK_SECONDS
+
+
+def declare_incoming(db: Session, notice: str) -> int:
+    text = (notice or "").strip()
+    if not text:
+        raise ValueError("Write what is coming in.")
     with write_lock:
         state = db.get(HospitalState, 1)
-        if state is None or state.surge:
-            return 0
+        if state is None:
+            raise ValueError("The hospital census is not ready.")
+        if state.surge:
+            raise ValueError("An incoming notice is already active.")
         state.surge = True
-        rooms = db.scalars(
-            select(Room).where(
-                Room.floor_id.in_(("F1", "F3")),
-                Room.surge.is_(True),
-                Room.kind == "bed",
-                Room.status == "available",
-            )
-        ).all()
-        flipped = 0
-        taken = set(db.scalars(select(Patient.name)).all())
-        for room in rooms:
-            flipped += 1
-            team = "icu" if room.dept == "icu" else "ed"
-            physician, nurse = crew(team, random.randrange(2))
-            name = fresh_patient_name(taken, random.randrange(10_000))
-            taken.add(name)
-            case = clinical_case(name, "critical", flipped)
-            db.add(Patient(
-                name=name,
-                acuity="critical",
-                room_id=room.id,
-                needs_or=False,
-                physician=physician,
-                nurse=nurse,
-                age=case["age"],
-                chief_complaint=case["chief_complaint"],
-                diagnosis=case["diagnosis"],
-                stay_ticks=0,
-            ))
-            room.status = "critical"
-            _log(db, name, f"{name} admitted to {room.id}", room.id, "admit")
-        _log(db, "Command", f"Surge declared. {flipped} open beds held on F1 and F3.", None, "admit")
+        state.incoming_notice = text[:240]
+        landed = 0
+        for _ in range(WAVE_SIZE):
+            if not _admit_critical(db):
+                break
+            landed += 1
+        _log(db, "Command", f"Incoming: {state.incoming_notice}", None, "admit")
         db.commit()
-        return flipped
+        return landed
+
+
+def call_physicians(db: Session) -> int:
+    with write_lock:
+        state = db.get(HospitalState, 1)
+        if state is None or not state.surge:
+            raise ValueError("Call physicians after an incoming notice.")
+        if state.called_physicians:
+            return state.called_physicians
+        brought = 0
+        for name, role, unit, specialty, shift, extension in CALLBACKS:
+            person = db.scalar(select(Staff).where(Staff.name == name))
+            if person is None:
+                person = Staff(
+                    name=name,
+                    role=role,
+                    unit=unit,
+                    specialty=specialty,
+                    shift=shift,
+                    on_duty=False,
+                    extension=extension,
+                )
+                db.add(person)
+                db.flush()
+            if not person.on_duty:
+                person.on_duty = True
+                brought += 1
+        state.called_physicians = brought or len(CALLBACKS)
+        _log(db, "Command", f"Called in {state.called_physicians} physicians.", None, "move")
+        db.commit()
+        return state.called_physicians
+
+
+def divert_overflow(db: Session) -> int:
+    with write_lock:
+        state = db.get(HospitalState, 1)
+        if state is None or not state.surge:
+            raise ValueError("Divert after an incoming notice.")
+        people = _ed_patients(db)
+        random.shuffle(people)
+        sent = 0
+        for patient in people[:DIVERT_BATCH]:
+            if _send_outside(db, patient):
+                sent += 1
+        state.diverted_count = (state.diverted_count or 0) + sent
+        if sent:
+            _log(
+                db,
+                "Command",
+                f"Diverted {sent} emergency patients to {OUTSIDE_HOSPITAL}.",
+                None,
+                "divert",
+            )
+        db.commit()
+        return sent
+
+
+def reset_demo(db: Session) -> str:
+    with write_lock:
+        state = db.get(HospitalState, 1)
+        if state is None:
+            raise ValueError("The hospital census is not ready.")
+        state.surge = False
+        state.incoming_notice = None
+        state.called_physicians = 0
+        state.diverted_count = 0
+        for name, *_rest in CALLBACKS:
+            person = db.scalar(select(Staff).where(Staff.name == name))
+            if person is not None:
+                person.on_duty = False
+        room = _demo_bed(db)
+        patient = room.patient
+        if patient is not None:
+            db.delete(patient)
+            db.flush()
+            db.expire(room, ["patient"])
+        for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+            keeper.room_id = None
+        for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
+            aide.room_id = None
+        room.status = "cleaning"
+        room.hold_for = DEMO_WAITING
+        _stamp_clean(db, room, "")
+        for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+            keeper.room_id = None
+        state.demo_room_id = room.id
+        keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
+        if keepers and not any(keeper.room_id is None for keeper in keepers):
+            keepers[-1].room_id = None
+        _log(
+            db,
+            DEMO_WAITING,
+            f"{DEMO_WAITING} is waiting on {room.id}. The bed is not usable until the clean finishes.",
+            room.id,
+            "move",
+        )
+        db.commit()
+        return room.id
 
 
 ADMIT_SITES = (("F1", "ED"), ("F1", "FAST"), ("F1", "OBS"), ("F3", "ER"))
@@ -121,7 +219,11 @@ def _roll(db: Session):
         if ready:
             options.append((weight, step))
 
-    offer(WEIGHTS["admit"], _admit_sites(db), _admit_one)
+    state = db.get(HospitalState, 1)
+    if state is not None and state.surge:
+        offer(90, _ed_beds(db), _admit_critical)
+    else:
+        offer(WEIGHTS["admit"], _admit_sites(db), _admit_one)
     offer(WEIGHTS["transfer"], _transfer_moves(db), _transfer_one)
     offer(WEIGHTS["or"], _or_moves(db), _or_one)
     offer(WEIGHTS["discharge"], _discharge_people(db), _discharge_one)
@@ -299,35 +401,148 @@ def _death_one(db: Session):
     return _die(db, random.choice(people))
 
 
+def vital_set(acuity: str, salt: int) -> dict:
+    """One stored reading. Temperature is tenths of a degree (384 means 38.4)."""
+    pick = random.Random(salt)
+    if acuity == "critical":
+        return {
+            "heart_rate": pick.randint(110, 138),
+            "systolic": pick.randint(78, 96),
+            "diastolic": pick.randint(48, 62),
+            "spo2": pick.randint(88, 93),
+            "respiratory_rate": pick.randint(24, 32),
+            "temperature": pick.randint(380, 392),
+        }
+    if acuity == "warning":
+        return {
+            "heart_rate": pick.randint(96, 112),
+            "systolic": pick.randint(138, 162),
+            "diastolic": pick.randint(86, 100),
+            "spo2": pick.randint(93, 96),
+            "respiratory_rate": pick.randint(20, 24),
+            "temperature": pick.randint(374, 382),
+        }
+    return {
+        "heart_rate": pick.randint(68, 90),
+        "systolic": pick.randint(108, 132),
+        "diastolic": pick.randint(68, 84),
+        "spo2": pick.randint(96, 99),
+        "respiratory_rate": pick.randint(14, 18),
+        "temperature": pick.randint(365, 372),
+    }
+
+
+def fill_missing_vitals(db: Session):
+    missing = db.scalars(select(Patient).where(Patient.heart_rate.is_(None))).all()
+    for patient in missing:
+        values = vital_set(patient.acuity or "normal", patient.id or 0)
+        patient.heart_rate = values["heart_rate"]
+        patient.systolic = values["systolic"]
+        patient.diastolic = values["diastolic"]
+        patient.spo2 = values["spo2"]
+        patient.respiratory_rate = values["respiratory_rate"]
+        patient.temperature = values["temperature"]
+
+
+def _ed_beds(db: Session):
+    beds = []
+    for floor_id, prefix in ADMIT_SITES:
+        beds.extend(_beds(db, floor_id=floor_id, prefix=prefix))
+    return beds
+
+
+def _admit_critical(db: Session):
+    beds = _ed_beds(db)
+    if not beds:
+        return None
+    return _receive(db, random.choice(beds), "critical")
+
+
+def _ed_patients(db: Session):
+    people = []
+    for person in db.scalars(select(Patient).join(Room)).unique().all():
+        room = person.room
+        if room is None or room.kind != "bed" or room.dept != "ed":
+            continue
+        people.append(person)
+    return people
+
+
 def _admit(db: Session, floor_id: str, prefix: str):
     beds = _beds(db, floor_id=floor_id, prefix=prefix)
+    if not beds:
+        return None
+    acuity = random.choice(("critical", "warning", "normal"))
+    return _receive(db, random.choice(beds), acuity)
+
+
+def _receive(db: Session, bed: Room, acuity: str):
     state = db.get(HospitalState, 1)
-    if not beds or state is None:
+    if state is None:
         return None
     state.admit_index += 1
-    bed = random.choice(beds)
-    acuity = random.choice(("critical", "warning", "normal"))
     taken = set(db.scalars(select(Patient.name)).all())
     name = fresh_patient_name(taken, random.randrange(10_000))
-    physician, nurse = crew("ed", random.randrange(2))
+    team = "icu" if bed.dept == "icu" else "ed"
+    physician, nurse = crew(team, random.randrange(2))
     case = clinical_case(name, acuity, state.admit_index)
     patient = Patient(
         name=name,
         acuity=acuity,
         room_id=bed.id,
-        needs_or=random.random() < 0.35,
+        needs_or=acuity == "critical" and random.random() < 0.35,
         physician=physician,
         nurse=nurse,
         age=case["age"],
         chief_complaint=case["chief_complaint"],
         diagnosis=case["diagnosis"],
         stay_ticks=0,
+        **vital_set(acuity, state.admit_index),
     )
     db.add(patient)
     bed.status = acuity
+    bed.hold_for = None
     _clear_clean(bed)
     _log(db, name, f"{name} admitted to {bed.id}", bed.id, "admit")
     return f"admit {name}"
+
+
+def _send_outside(db: Session, patient: Patient):
+    patient = _claim(db, patient)
+    if patient is None:
+        return False
+    room = db.get(Room, patient.room_id)
+    if room is None:
+        return False
+    name = patient.name
+    room_id = room.id
+    db.add(Transfer(
+        patient_name=name,
+        destination=OUTSIDE_HOSPITAL,
+        reason="incoming",
+    ))
+    db.delete(patient)
+    room.status = "available"
+    room.hold_for = None
+    _clear_clean(room)
+    for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
+        keeper.room_id = None
+    for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
+        aide.room_id = None
+    _log(db, name, f"{name} diverted from {room_id} to {OUTSIDE_HOSPITAL}", room_id, "divert")
+    return True
+
+
+def _demo_bed(db: Session) -> Room:
+    room = db.get(Room, DEMO_ROOM)
+    if room is not None and room.kind == "bed":
+        return room
+    fallback = db.scalars(
+        select(Room).where(Room.floor_id == "F1", Room.dept == "ed", Room.kind == "bed").order_by(Room.id)
+    ).first()
+    if fallback is None:
+        raise ValueError("No emergency bed to stage.")
+    return fallback
 
 
 def _shift(db: Session, people, beds, label: str):
@@ -544,7 +759,11 @@ def _try_open(db: Session, room: Room, keeper_name: str | None = None):
     who = keeper_name or "Housekeeping"
     _release_linen(db, room)
     room.status = "available"
+    room.hold_for = None
     _clear_clean(room)
+    state = db.get(HospitalState, 1)
+    if state is not None and state.demo_room_id == room.id:
+        state.demo_room_id = None
     _log(db, "Housekeeping", f"{room.id} is open · {who} · {clean_type}", room.id, "clean")
     return f"clean {room.id}"
 
@@ -573,7 +792,13 @@ def _assign_housekeepers(db: Session):
         room.clean_priority = 1 if _in_demand(db, room) else 0
         waiting.append(room)
     waiting.sort(key=lambda room: (-(room.clean_priority or 0), room.queued_tick or 0, room.id))
+    state = db.get(HospitalState, 1)
+    held = state.demo_room_id if state is not None else None
+    if held:
+        waiting = [room for room in waiting if room.id != held]
     free = [keeper for keeper in keepers if not keeper.room_id]
+    if held and free:
+        free = free[:-1]
     for keeper, room in zip(free, waiting):
         keeper.room_id = room.id
 
@@ -798,6 +1023,9 @@ def assign_housekeeper(db: Session, room_id: str, keeper_id: int) -> str | None:
             if other.id != keeper.id:
                 other.room_id = None
         keeper.room_id = room.id
+        state = db.get(HospitalState, 1)
+        if state is not None and state.demo_room_id == room.id:
+            state.demo_room_id = None
         _log(db, keeper.name, f"{keeper.name} assigned to {room.id}", room.id, "clean")
         db.commit()
     return None
@@ -811,10 +1039,16 @@ def complete_clean(db: Session, room_id: str) -> tuple[str | None, bool]:
         if room.status != "cleaning":
             return "That room is not in cleaning.", False
         room.ticks_left = 0
+        room.linen_stage = "ready"
+        room.linen_ticks = 0
         keeper_name = None
         for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
             keeper_name = keeper.name
             keeper.room_id = None
+        for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
+            if keeper_name is None:
+                keeper_name = aide.name
+            aide.room_id = None
         opened = _try_open(db, room, keeper_name)
         db.commit()
         if opened:

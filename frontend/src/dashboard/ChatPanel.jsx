@@ -1,17 +1,22 @@
 import { useState } from "react";
 import { apiUrl } from "../api/client";
 
-export default function ChatPanel({ open, onClose }) {
+const PROMPTS = [
+  "What is stopped?",
+  "Who can clean a room?",
+  "Which bed can I use?",
+];
+
+export default function ChatPanel({ open, onClose, surgeOn = false }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function send(event) {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || busy) return;
-    const next = [...messages, { role: "user", content: text }];
+  async function ask(text) {
+    const question = text.trim();
+    if (!question || busy) return;
+    const next = [...messages, { role: "user", content: question }];
     setMessages(next);
     setDraft("");
     setBusy(true);
@@ -55,7 +60,17 @@ export default function ChatPanel({ open, onClose }) {
         {busy && <p className="is-assistant">Reading the census…</p>}
         {error && <p className="is-error">{error}</p>}
       </div>
-      <form onSubmit={send}>
+      <div className="assist-prompts">
+        {(surgeOn ? [...PROMPTS, "What is coming in?"] : PROMPTS).map((prompt) => (
+          <button key={prompt} type="button" onClick={() => ask(prompt)} disabled={busy}>
+            {prompt}
+          </button>
+        ))}
+      </div>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        ask(draft);
+      }}>
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}

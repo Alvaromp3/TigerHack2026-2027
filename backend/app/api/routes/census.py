@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import FlowEvent, HospitalState, Housekeeper, LinenAide, Room, Staff, Transfer
-from app.sim import declare_surge
+from app.sim import call_physicians, declare_incoming, divert_overflow, reset_demo
 
 router = APIRouter()
 
@@ -26,6 +27,12 @@ def _room_payload(room: Room, housekeeper: str | None = None, linen_aide: str | 
         "age": patient.age if patient else None,
         "chief_complaint": patient.chief_complaint if patient else None,
         "diagnosis": patient.diagnosis if patient else None,
+        "heart_rate": patient.heart_rate if patient else None,
+        "systolic": patient.systolic if patient else None,
+        "diastolic": patient.diastolic if patient else None,
+        "spo2": patient.spo2 if patient else None,
+        "respiratory_rate": patient.respiratory_rate if patient else None,
+        "temperature": patient.temperature if patient else None,
         "clean_type": room.clean_type,
         "clean_priority": room.clean_priority,
         "ticks_left": room.ticks_left,
@@ -62,6 +69,9 @@ def census(db: Session = Depends(get_db)):
     aides, _ = _aide_names(db)
     return {
         "surge": bool(state and state.surge),
+        "incoming_notice": state.incoming_notice if state else None,
+        "called_physicians": state.called_physicians if state else 0,
+        "diverted_count": state.diverted_count if state else 0,
         "rooms": _rooms(db),
         "housekeepers": [
             {"id": keeper.id, "name": keeper.name, "room_id": keeper.room_id}
@@ -148,8 +158,55 @@ def staff(db: Session = Depends(get_db)):
     }
 
 
+class NoticeIn(BaseModel):
+    notice: str = Field(min_length=1, max_length=240)
+
+
+def _state_payload(db: Session, state: HospitalState | None):
+    return {
+        "surge": bool(state and state.surge),
+        "incoming_notice": state.incoming_notice if state else None,
+        "called_physicians": state.called_physicians if state else 0,
+        "diverted_count": state.diverted_count if state else 0,
+        "rooms": _rooms(db),
+    }
+
+
 @router.post("/surge")
-def surge(db: Session = Depends(get_db)):
-    flipped = declare_surge(db)
+def surge(body: NoticeIn, db: Session = Depends(get_db)):
+    try:
+        admitted = declare_incoming(db, body.notice)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     state = db.get(HospitalState, 1)
-    return {"flipped": flipped, "surge": bool(state and state.surge), "rooms": _rooms(db)}
+    return {"admitted": admitted, **_state_payload(db, state)}
+
+
+@router.post("/surge/physicians")
+def physicians(db: Session = Depends(get_db)):
+    try:
+        called = call_physicians(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    state = db.get(HospitalState, 1)
+    return {"called": called, **_state_payload(db, state)}
+
+
+@router.post("/surge/divert")
+def divert(db: Session = Depends(get_db)):
+    try:
+        diverted = divert_overflow(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    state = db.get(HospitalState, 1)
+    return {"diverted": diverted, **_state_payload(db, state)}
+
+
+@router.post("/demo/reset")
+def demo_reset(db: Session = Depends(get_db)):
+    try:
+        room_id = reset_demo(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    state = db.get(HospitalState, 1)
+    return {"room_id": room_id, **_state_payload(db, state)}

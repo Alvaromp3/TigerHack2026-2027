@@ -35,6 +35,18 @@ def init_db():
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_stage VARCHAR(16)"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS linen_ticks INTEGER"))
         conn.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS hold_for VARCHAR(80)"))
+        conn.execute(text("ALTER TABLE hospital_state ADD COLUMN IF NOT EXISTS incoming_notice VARCHAR(240)"))
+        conn.execute(text("ALTER TABLE hospital_state ADD COLUMN IF NOT EXISTS called_physicians INTEGER"))
+        conn.execute(text("ALTER TABLE hospital_state ADD COLUMN IF NOT EXISTS diverted_count INTEGER"))
+        conn.execute(text("ALTER TABLE hospital_state ADD COLUMN IF NOT EXISTS demo_room_id VARCHAR(16)"))
+        conn.execute(text("UPDATE hospital_state SET called_physicians = 0 WHERE called_physicians IS NULL"))
+        conn.execute(text("UPDATE hospital_state SET diverted_count = 0 WHERE diverted_count IS NULL"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS heart_rate INTEGER"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS systolic INTEGER"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS diastolic INTEGER"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS spo2 INTEGER"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS respiratory_rate INTEGER"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS temperature INTEGER"))
     with SessionLocal() as db:
         seed_if_empty(db)
         pending = db.scalars(select_missing_cases()).all()
@@ -43,6 +55,9 @@ def init_db():
             patient.age = case["age"]
             patient.chief_complaint = case["chief_complaint"]
             patient.diagnosis = case["diagnosis"]
+        from app.sim import fill_missing_vitals
+
+        fill_missing_vitals(db)
         seed_staff_if_empty(db)
         seed_housekeepers_if_empty(db)
         seed_linen_aides_if_empty(db)

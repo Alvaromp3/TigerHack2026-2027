@@ -42,13 +42,15 @@ function toneClass(share) {
 }
 
 function houseState(share, available, surgeOn) {
-  if (surgeOn) return { word: "Surge", tone: "is-surge" };
+  if (surgeOn && (available === 0 || share >= 70)) return { word: "Surge", tone: "is-surge" };
+  if (surgeOn) return { word: "Watch", tone: "is-watch" };
   if (available === 0 || share >= 85) return { word: "Divert", tone: "is-divert" };
   if (share >= 70) return { word: "Watch", tone: "is-watch" };
   return { word: "Open", tone: "is-open" };
 }
 
-function houseNote({ available, total, critical, cleaning, surgeOn, surgeOpen }) {
+function houseNote({ available, total, critical, cleaning, surgeOn, surgeOpen, incomingNotice }) {
+  if (incomingNotice) return incomingNotice;
   if (surgeOn) {
     if (surgeOpen === 0) return "Emergency and ICU have no open beds left for incoming patients.";
     const beds = surgeOpen === 1 ? "bed is" : "beds are";
@@ -92,7 +94,15 @@ function codesFor(hospital, match) {
     .sort((a, b) => floorRank(a) - floorRank(b));
 }
 
-export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor }) {
+export default function Capacity({
+  hospital,
+  surgeOn,
+  incomingNotice,
+  calledPhysicians = 0,
+  divertedCount = 0,
+  activeFloorId,
+  onOpenFloor,
+}) {
   const model = useMemo(() => {
     const rooms = hospital.flatMap((floor) => floor.rooms);
     const house = tally(rooms);
@@ -169,6 +179,7 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
     cleaning: model.house.cleaning,
     surgeOn,
     surgeOpen: model.surgeOpen,
+    incomingNotice,
   });
 
   return (
@@ -179,6 +190,13 @@ export default function Capacity({ hospital, surgeOn, activeFloorId, onOpenFloor
           <span>{occupiedShare}% full</span>
         </p>
         <p>{stateNote}</p>
+        {(calledPhysicians > 0 || divertedCount > 0) && (
+          <p>
+            {calledPhysicians > 0 ? `${calledPhysicians} physicians called in` : ""}
+            {calledPhysicians > 0 && divertedCount > 0 ? " · " : ""}
+            {divertedCount > 0 ? `${divertedCount} diverted to County General` : ""}
+          </p>
+        )}
       </header>
 
       <section className="cap-metrics" aria-label="Hospital capacity">

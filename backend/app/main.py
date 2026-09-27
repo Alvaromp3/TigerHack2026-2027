@@ -8,14 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import auth, census, chat, health, incidents, ops, rooms, root
 from app.core.config import settings
 from app.db import SessionLocal, init_db
-from app.sim import TICK_SECONDS, tick
+from app.sim import TICK_SECONDS, tick, tick_seconds
 
 log = logging.getLogger(__name__)
 
 
 async def _census_loop():
     while True:
-        await asyncio.sleep(TICK_SECONDS)
+        try:
+            with SessionLocal() as db:
+                delay = tick_seconds(db)
+        except Exception:
+            delay = TICK_SECONDS
+        await asyncio.sleep(delay)
         try:
             with SessionLocal() as db:
                 tick(db)

@@ -14,8 +14,9 @@ router = APIRouter()
 SYSTEM = """You are the operations assistant for the president of Tiger Memorial Hospital.
 Answer only from the operations snapshot in this prompt.
 If the snapshot does not contain the fact, say it is not in the census.
-Do not invent patients, staff, beds, or times.
-Do not claim you changed the hospital. Point to Command, Staff, or Incidents for the button.
+Do not invent patients, staff, beds, times, or vital signs.
+If a vital sign is missing, say it is not recorded.
+Point to the live map for the room. Do not mention other screens.
 Reply in the same language as the latest user message.
 Keep the answer short enough to read on one screen."""
 
@@ -44,12 +45,16 @@ def chat(body: ChatIn, db: Session = Depends(get_db)):
     snapshot = build_ops(db)
     brief = {
         "surge": snapshot["surge"],
+        "incoming_notice": snapshot.get("incoming_notice"),
+        "called_physicians": snapshot.get("called_physicians"),
+        "diverted_count": snapshot.get("diverted_count"),
         "counts": snapshot["counts"],
         "items": snapshot["items"][:24],
         "usable": snapshot["usable"][:30],
         "holds": snapshot["holds"],
         "housekeepers": snapshot["housekeepers"],
         "staff": snapshot["staff"],
+        "beds": snapshot.get("beds", [])[:40],
         "units": snapshot["units"],
         "pending": snapshot["pending"][:20],
     }

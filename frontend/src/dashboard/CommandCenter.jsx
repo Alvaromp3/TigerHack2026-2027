@@ -2,13 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import LoginButton from "../auth/LoginButton";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
-import Capacity from "./Capacity";
 import ChatPanel from "./ChatPanel";
-import Command from "./Command";
-import IncidentsBoard from "./IncidentsBoard";
-import PatientFlow from "./PatientFlow";
-import Reports from "./Reports";
-import StaffBoard from "./StaffBoard";
 import {
   BUILDING,
   FRAME,
@@ -26,16 +20,6 @@ import { flowBucket } from "./flowBuckets";
 import { buildLiveOps, incidentsFromCensus } from "./liveOps";
 import "./dashboard.css";
 import logo from "./logo.png";
-
-const NAV = [
-  { id: "live", label: "Live Map", icon: "map" },
-  { id: "command", label: "Command", icon: "grid" },
-  { id: "capacity", label: "Capacity", icon: "bed" },
-  { id: "flow", label: "Patient Flow", icon: "flow" },
-  { id: "staff", label: "Staff", icon: "users" },
-  { id: "incidents", label: "Incidents", icon: "alert" },
-  { id: "reports", label: "Reports", icon: "chart" },
-];
 
 const SFX_BY_DEPARTMENT = {
   icu: "Intesive Care.mp3",
@@ -390,84 +374,138 @@ function esiFor(status) {
 }
 
 function vitalsFor(room) {
-  if (!room?.patient) return null;
-  if (room.status === "critical") {
-    return { hr: "118", bp: "88/54", spo2: "91%", rr: "28", temp: "38.4°C" };
-  }
-  if (room.status === "warning") {
-    return { hr: "104", bp: "148/92", spo2: "94%", rr: "22", temp: "37.8°C" };
-  }
-  return { hr: "82", bp: "128/78", spo2: "98%", rr: "16", temp: "36.9°C" };
-}
-
-function planFor(room) {
-  if (!room?.patient) return [];
-  const steps = [];
-  if (room.chiefComplaint) steps.push(`Address: ${room.chiefComplaint}`);
-  if (room.diagnosis) steps.push(`Working dx: ${room.diagnosis}`);
-  if (room.needsOr) steps.push("OR hold requested — surgeon notified");
-  if (room.status === "critical") {
-    steps.push("Stay with patient · q5 min vitals");
-    steps.push("Blood bank / imaging on standby");
-  } else if (room.status === "warning") {
-    steps.push("Reassess in 15 min · escalate if worsening");
-  } else {
-    steps.push("Await labs / imaging · disposition pending");
-  }
-  return steps;
+  if (room?.heartRate == null) return null;
+  const temp = room.temperature == null ? "—" : `${(room.temperature / 10).toFixed(1)}°C`;
+  const pressure = room.systolic != null && room.diastolic != null
+    ? `${room.systolic}/${room.diastolic}`
+    : "—";
+  return {
+    hr: String(room.heartRate),
+    bp: pressure,
+    spo2: room.spo2 == null ? "—" : `${room.spo2}%`,
+    rr: room.respiratoryRate == null ? "—" : String(room.respiratoryRate),
+    temp,
+  };
 }
 
 function historyFor(room, movements = []) {
-  const live = (movements || [])
+  return (movements || [])
     .filter((item) => item.room_id === room.id || (room.patient && item.patient_name === room.patient))
-    .slice(0, 8)
+    .slice(0, 12)
     .map((item) => {
       const stamp = item.created_at ? new Date(item.created_at) : null;
       const time = stamp && !Number.isNaN(stamp.getTime())
         ? stamp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
         : "—";
-      return {
-        time,
-        text: item.message,
-        tag: item.patient_name === "Command" || item.patient_name === "Housekeeping" || item.patient_name === "Census"
-          ? item.patient_name
-          : "Flow",
-      };
+      const tag = item.patient_name && item.patient_name !== room.patient
+        ? item.patient_name
+        : "Census";
+      return { time, text: item.message, tag };
     });
+}
 
-  if (live.length) return live;
+function minutesLeft(ticks) {
+  if (ticks == null) return "—";
+  if (ticks <= 0) return "Finished";
+  const seconds = ticks * 9;
+  if (seconds < 60) return "Under a minute";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes === 1 ? "About 1 min" : `About ${minutes} min`;
+}
 
-  if (room.activity?.length) return room.activity;
+function severityWord(status) {
+  if (status === "critical") return "Critical";
+  if (status === "warning") return "Watch";
+  return "Stable";
+}
 
+function dispositionFor(room, surgeOn) {
+  if (room.needsOr) return "Needs OR";
+  if (room.status === "critical" || room.status === "warning") return "Must stay";
+  const emergency = room.dept === "ed" || room.dept === "trauma";
+  if (emergency && surgeOn) return "Divert candidate";
+  if (room.status === "normal") return "Ready for discharge";
+  return "Must stay";
+}
+
+function cleaningBrief(room) {
+  const cleanOpen = (room.ticksLeft ?? 1) > 0;
+  const linenOut = Boolean(room.linenStage) && room.linenStage !== "ready";
+  if (cleanOpen && linenOut) {
+    return {
+      why: "Cleaning is not finished, and soiled linen is still out.",
+      owner: room.housekeeper || "Unassigned",
+      ready: minutesLeft(Math.max(room.ticksLeft || 0, room.linenTicks || 0)),
+    };
+  }
+  if (cleanOpen) {
+    return {
+      why: "Cleaning has not finished.",
+      owner: room.housekeeper || "Unassigned",
+      ready: minutesLeft(room.ticksLeft),
+    };
+  }
+  if (linenOut) {
+    return {
+      why: "The clean is finished, but the bed stays closed until clean linen arrives.",
+      owner: room.linenAide || "Linen",
+      ready: minutesLeft(room.linenTicks),
+    };
+  }
+  return {
+    why: "Cleaning is finished. The bed is waiting to be opened.",
+    owner: room.housekeeper || "Housekeeping",
+    ready: "Now",
+  };
+}
+
+function situationFor(room, floor) {
   if (!room.census) {
-    return [{ time: "—", text: "No clinical events logged for this space.", tag: "Floor" }];
-  }
-
-  if (room.status === "available") {
-    return [
-      { time: "09:40", text: "Bed marked ready for assignment", tag: "Housekeeping" },
-      { time: "09:22", text: "Terminal clean complete", tag: "EVS" },
-    ];
-  }
-  if (room.status === "cleaning") {
-    return [
-      { time: "10:12", text: "Cleaning in progress", tag: "Housekeeping" },
-      { time: "10:05", text: "Previous patient discharged", tag: "Nursing" },
-    ];
+    return {
+      band: "Support",
+      tone: "is-support",
+      why: `${room.type || room.deptLabel} on ${floor.name}. This is not an inpatient bed.`,
+    };
   }
   if (room.patient) {
-    const rows = [
-      { time: "10:18", text: `${room.patient} assigned to ${room.id}`, tag: "Charge nurse" },
-      { time: "10:05", text: room.chiefComplaint || "Chief complaint documented", tag: "Triage" },
-      { time: "09:52", text: room.diagnosis ? `Working diagnosis: ${room.diagnosis}` : "Workup started", tag: "Physician" },
-      { time: "09:40", text: `${room.physician || "Attending"} at bedside`, tag: "Physician" },
-      { time: "09:28", text: `${room.nurse || "Primary nurse"} assumed care`, tag: "Nursing" },
-    ];
-    if (room.needsOr) rows.splice(2, 0, { time: "09:58", text: "OR reservation requested", tag: "Surgery" });
-    if (room.status === "critical") rows.unshift({ time: "10:24", text: "Acuity raised to critical", tag: "Charge nurse" });
-    return rows;
+    const word = severityWord(room.status);
+    return {
+      band: "Occupied",
+      detail: word,
+      tone: room.status === "critical" ? "is-critical" : "is-occupied",
+      why: `${room.patient} is ${word.toLowerCase()}. ${room.diagnosis || room.chiefComplaint || "Workup is in progress."}`,
+    };
   }
-  return [{ time: "—", text: "No clinical events on this room.", tag: "Floor" }];
+  if (room.status === "cleaning") {
+    const brief = cleaningBrief(room);
+    const waiting = room.holdFor ? ` ${room.holdFor} is waiting for this bed.` : "";
+    return {
+      band: "Blocked",
+      tone: "is-blocked",
+      why: `${brief.why}${waiting}`,
+      owner: brief.owner,
+      ready: brief.ready,
+    };
+  }
+  if (room.status === "reserved") {
+    return {
+      band: "Blocked",
+      tone: "is-blocked",
+      why: `Held for ${room.holdFor || "a patient"}. Not usable until the hold is released.`,
+    };
+  }
+  if (room.status === "blocked") {
+    return {
+      band: "Blocked",
+      tone: "is-blocked",
+      why: "This bed is out of service.",
+    };
+  }
+  return {
+    band: "Usable",
+    tone: "is-usable",
+    why: "Open for the next patient.",
+  };
 }
 
 const CLEAN_LABEL = { standard: "Standard", terminal: "Terminal", stat: "STAT" };
@@ -480,14 +518,6 @@ const LINEN_LABEL = {
 
 function cleanLabel(type) {
   return CLEAN_LABEL[type] || "Standard";
-}
-
-function ticksLabel(ticks) {
-  if (ticks === 0) return "Done";
-  if (ticks == null) return "—";
-  const seconds = ticks * 9;
-  if (seconds >= 60) return `${ticks} ticks · ~${Math.round(seconds / 60)} min`;
-  return `${ticks} ticks · ~${seconds}s`;
 }
 
 function cleanQueue(hospital) {
@@ -547,6 +577,9 @@ export default function CommandCenter() {
   const [note, setNote] = useState(null);
   const [elevatorOpen, setElevatorOpen] = useState(false);
   const [surgeOn, setSurgeOn] = useState(false);
+  const [incomingNotice, setIncomingNotice] = useState("");
+  const [calledPhysicians, setCalledPhysicians] = useState(0);
+  const [divertedCount, setDivertedCount] = useState(0);
   const [transfers, setTransfers] = useState([]);
   const [roster, setRoster] = useState([]);
   const [movements, setMovements] = useState([]);
@@ -628,6 +661,9 @@ export default function CommandCenter() {
         if (census) {
           setHospital((current) => applyCensus(current, census.rooms));
           setSurgeOn(Boolean(census.surge));
+          setIncomingNotice(census.incoming_notice || "");
+          setCalledPhysicians(census.called_physicians || 0);
+          setDivertedCount(census.diverted_count || 0);
         }
         if (!stop) {
           setTransfers(transferRows);
@@ -657,7 +693,7 @@ export default function CommandCenter() {
 
     pull();
     reloadRef.current = pull;
-    const timer = setInterval(pull, 4000);
+    const timer = setInterval(pull, 2000);
     return () => {
       stop = true;
       clearInterval(timer);
@@ -774,15 +810,23 @@ export default function CommandCenter() {
   }
 
   async function runAction(path, body) {
-    const res = await fetch(apiUrl(path), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(apiUrl(path), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      throw new Error("The hospital did not answer. Make sure the server is on, then try again.");
+    }
     const data = await res.json().catch(() => ({}));
+    if (res.status === 404) {
+      throw new Error("The live hospital answered, but this button is not on that server yet. The map and the numbers are live.");
+    }
     if (!res.ok) {
       const detail = data.detail;
-      throw new Error(typeof detail === "string" ? detail : "That action did not save.");
+      throw new Error(typeof detail === "string" ? detail : "That did not save. Try again.");
     }
     await reloadRef.current();
     return data;
@@ -814,7 +858,7 @@ export default function CommandCenter() {
   async function assignClean(roomId, housekeeperId) {
     try {
       await runAction(`/api/rooms/${roomId}/assign`, { housekeeper_id: housekeeperId });
-      setActionNote(`${roomId} has a housekeeper.`);
+      setActionNote(`${roomId} has someone cleaning it. Press “The bed is ready” when they finish.`);
     } catch (error) {
       setActionNote(error.message);
     }
@@ -823,27 +867,15 @@ export default function CommandCenter() {
   async function completeClean(roomId) {
     try {
       const data = await runAction(`/api/rooms/${roomId}/clean/complete`, {});
-      setActionNote(data.opened ? `${roomId} is usable.` : data.reason);
+      setActionNote(data.opened ? `${roomId} is ready for a patient. The open-bed number went up.` : data.reason);
     } catch (error) {
       setActionNote(error.message);
     }
   }
 
   function openOpsItem(item) {
-    if (item.nav === "staff") {
-      chooseNav("staff");
-      return;
-    }
     if (item.nav === "capacity") {
       chooseNav("capacity");
-      return;
-    }
-    if (item.nav === "flow" && !item.room_id) {
-      chooseNav("flow");
-      return;
-    }
-    if (item.nav === "incidents" && !item.room_id) {
-      chooseNav("incidents");
       return;
     }
     if (!item.room_id) return;
@@ -856,22 +888,61 @@ export default function CommandCenter() {
     }
   }
 
-  async function declareSurge() {
+  function applyActionState(data) {
+    if (data.rooms) setHospital((current) => applyCensus(current, data.rooms));
+    setSurgeOn(Boolean(data.surge));
+    setIncomingNotice(data.incoming_notice || "");
+    setCalledPhysicians(data.called_physicians || 0);
+    setDivertedCount(data.diverted_count || 0);
+  }
+
+  async function declareIncoming(notice) {
     if (surgeOn) return;
     try {
-      const res = await fetch(apiUrl("/api/surge"), { method: "POST" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setHospital((current) => applyCensus(current, data.rooms));
-      setSurgeOn(true);
+      const data = await runAction("/api/surge", { notice });
+      applyActionState(data);
       setActionNote(
-        data.flipped
-          ? `${data.flipped} open beds on F1 and F3 are now held for the incoming surge.`
-          : "No open surge beds left on F1 or F3.",
+        data.admitted
+          ? `The hospital heard you. ${data.admitted} very sick patients are arriving. Now call doctors or send people to another hospital.`
+          : "The hospital heard you. Emergency has no open bed, so send patients to another hospital.",
       );
-      await reloadRef.current();
-    } catch {
-      setActionNote("Could not reach the census service.");
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
+
+  async function callPhysicians() {
+    try {
+      const data = await runAction("/api/surge/physicians");
+      applyActionState(data);
+      setActionNote(`${data.called} extra doctors are now at the hospital.`);
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
+
+  async function divertPatients() {
+    try {
+      const data = await runAction("/api/surge/divert");
+      applyActionState(data);
+      setActionNote(
+        data.diverted
+          ? `${data.diverted} patients went to County General. Those beds are free again.`
+          : "There is nobody left in Emergency to send away.",
+      );
+    } catch (error) {
+      setActionNote(error.message);
+    }
+  }
+
+  async function resetDemo() {
+    try {
+      const data = await runAction("/api/demo/reset");
+      applyActionState(data);
+      setActionNote(`Start here: ${data.room_id} is dirty. Jordan Hale is waiting for that bed. Pick who cleans it, then press “The bed is ready”.`);
+      setNav("command");
+    } catch (error) {
+      setActionNote(error.message);
     }
   }
 
@@ -879,34 +950,47 @@ export default function CommandCenter() {
 
   useLayoutEffect(() => {
     const stage = mapRef.current;
-    if (!stage) return;
-    const frame = stage.querySelector(".map-body") || stage;
-    const stageRect = frame.getBoundingClientRect();
-    const overview = stage.querySelector(".overview");
-    const detail = stage.querySelector(".detail");
-    const width = stageRect.width;
-    const height = stageRect.height;
-    if (width < 80 || height < 80) return;
-    const left = overview ? overview.getBoundingClientRect().right - stageRect.left + 14 : 18;
-    const right = detail ? stageRect.right - detail.getBoundingClientRect().left + 14 : 18;
-    const top = 14;
-    const bottom = 36;
-    const freeW = Math.max(160, width - left - right);
-    const freeH = Math.max(160, height - top - bottom);
-    const bw = BUILDING.w + 2.4;
-    const bh = BUILDING.h + 2.4;
-    const scaleW = (FRAME.w * freeW) / (bw * width);
-    const scaleH = (FRAME.h * freeH) / (bh * height);
-    const z = Math.max(0.22, Math.min(scaleW, scaleH));
-    zoomRef.current = z;
-    setZoom(z);
-    const fx = (left + freeW / 2) / width;
-    const fy = (top + freeH / 2) / height;
-    setPan({
-      x: BUILDING.x + BUILDING.w / 2 - fx * (FRAME.w / z) - FRAME.x,
-      y: BUILDING.y + BUILDING.h / 2 - fy * (FRAME.h / z) - FRAME.y,
+    if (!stage) return undefined;
+    const frame = stage.querySelector(".map-canvas") || stage.querySelector(".map-body") || stage;
+    let raf = 0;
+
+    function fit() {
+      const stageRect = frame.getBoundingClientRect();
+      const width = stageRect.width;
+      const height = stageRect.height;
+      if (width < 48 || height < 48) return;
+      const left = 18;
+      const right = 18;
+      const top = 14;
+      const bottom = 36;
+      const freeW = Math.max(160, width - left - right);
+      const freeH = Math.max(160, height - top - bottom);
+      const bw = BUILDING.w + 2.4;
+      const bh = BUILDING.h + 2.4;
+      const scaleW = (FRAME.w * freeW) / (bw * width);
+      const scaleH = (FRAME.h * freeH) / (bh * height);
+      const z = Math.max(0.22, Math.min(scaleW, scaleH));
+      zoomRef.current = z;
+      setZoom(z);
+      const fx = (left + freeW / 2) / width;
+      const fy = (top + freeH / 2) / height;
+      setPan({
+        x: BUILDING.x + BUILDING.w / 2 - fx * (FRAME.w / z) - FRAME.x,
+        y: BUILDING.y + BUILDING.h / 2 - fy * (FRAME.h / z) - FRAME.y,
+      });
+    }
+
+    fit();
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(fit);
     });
-  }, [fitToken]);
+    observer.observe(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [fitToken, selectedId, note]);
 
   function fitMap() {
     setFitToken((token) => token + 1);
@@ -925,10 +1009,6 @@ export default function CommandCenter() {
   const deptBeds = selected
     ? floor.rooms.filter((room) => room.census && room.dept === selected.dept)
     : [];
-  const deptOccupied = deptBeds.filter((room) =>
-    ["critical", "warning", "normal"].includes(room.status),
-  ).length;
-  const occPct = deptBeds.length ? Math.round((deptOccupied / deptBeds.length) * 100) : 0;
   const clock = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   const dateLabel = now.toLocaleDateString("en-US", {
     weekday: "short",
@@ -1007,10 +1087,7 @@ export default function CommandCenter() {
           <button
             type="button"
             className="flow-notice"
-            onClick={() => {
-              setFlowNotice("");
-              chooseNav("flow");
-            }}
+            onClick={() => setFlowNotice("")}
           >
             {flowNotice}
           </button>
@@ -1029,7 +1106,7 @@ export default function CommandCenter() {
             >
               <Icon name="chat" />
             </button>
-            <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
+            <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} surgeOn={surgeOn} />
           </div>
           <div className="bell-wrap">
             <button
@@ -1076,154 +1153,11 @@ export default function CommandCenter() {
         </div>
       </header>
 
-      <div className={navCollapsed ? "workspace is-slim" : "workspace"}>
-        <aside className={navCollapsed ? "nav is-collapsed" : "nav"}>
-          <button
-            type="button"
-            className="nav-collapse"
-            aria-label={navCollapsed ? "Expand sidebar" : "Minimize sidebar"}
-            aria-expanded={!navCollapsed}
-            onClick={() => setNavCollapsed((open) => !open)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d={navCollapsed ? "M8 6l5 6-5 6M13 6l5 6-5 6" : "M16 6l-5 6 5 6M11 6l-5 6 5 6"}
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-
-          <div className="nav-list">
-            {NAV.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={nav === item.id ? "nav-btn is-on" : "nav-btn"}
-                onClick={() => chooseNav(item.id)}
-                onMouseEnter={placeNavTip}
-                onFocus={placeNavTip}
-              >
-                <Icon name={item.icon} />
-                <span className="nav-label">{item.label}</span>
-                {item.id === "incidents" && badge > 0 && <em className="nav-badge">{badge}</em>}
-                <span className="nav-tip">{item.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="campus">
-            <div className="campus-copy">
-              <div className="campus-photo">
-                <img src="/main-hospital.jpg?v=3" alt="Main Hospital" />
-                <div className="campus-meta">
-                  <span>Campus</span>
-                  <strong>Main Hospital</strong>
-                  <em>{floor.subtitle || floor.name}</em>
-                </div>
-              </div>
-            </div>
-            <div
-              className="campus-floors"
-              role="group"
-              aria-label="Floors"
-              style={{ "--floor-index": Math.max(0, hospital.findIndex((level) => level.id === floor.id)) }}
-            >
-              <span className="floor-thumb" aria-hidden="true" />
-              {hospital.map((level) => (
-                <button
-                  key={level.id}
-                  type="button"
-                  className={level.id === floor.id ? "floor-chip is-on" : "floor-chip"}
-                  aria-pressed={level.id === floor.id}
-                  aria-label={level.name}
-                  onClick={() => goToFloor(level.id)}
-                  onMouseEnter={placeNavTip}
-                  onFocus={placeNavTip}
-                >
-                  {level.code}
-                  <span className="nav-tip">{level.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </aside>
-
+      <div className="workspace">
         <main className="stage">
-          {nav === "capacity" && (
-            <Capacity
-              hospital={hospital}
-              surgeOn={surgeOn}
-              activeFloorId={floor.id}
-              onOpenFloor={(id) => {
-                setFloorId(id);
-                setSelectedId(null);
-                setHover(null);
-                setNote(null);
-                setElevatorOpen(false);
-                setNav("live");
-                setFitToken((token) => token + 1);
-              }}
-            />
-          )}
-          {nav === "command" && (
-            <Command
-              ops={ops}
-              surgeOn={surgeOn}
-              onDeclareSurge={declareSurge}
-              onOpenItem={openOpsItem}
-              onAssign={assignClean}
-              onComplete={completeClean}
-              keepers={ops?.housekeepers || []}
-              notice={actionNote}
-            />
-          )}
-          {nav === "flow" && (
-            <PatientFlow
-              movements={movements}
-              pending={ops?.pending || []}
-              linked={flowLive}
-              syncedAt={flowSyncedAt}
-              onOpenMovement={openMovement}
-            />
-          )}
-          {nav === "staff" && (
-            <StaffBoard
-              ops={ops}
-              onAssign={assignClean}
-              notice={actionNote}
-            />
-          )}
-          {nav === "incidents" && (
-            <IncidentsBoard
-              hospital={hospital}
-              incidents={incidents}
-              notice={actionNote}
-              onReport={reportIncident}
-              onResolve={resolveIncident}
-              onOpenRoom={(roomId) => openOpsItem({ nav: "live", room_id: roomId })}
-            />
-          )}
-          {nav === "reports" && (
-            <Reports
-              hospital={hospital}
-              movements={movements}
-              incidents={incidents}
-              flowLive={flowLive}
-              syncedAt={flowSyncedAt}
-              onOpenRoom={(floorId, roomId) => {
-                const level = hospital.find((item) => item.id === floorId);
-                const room = level?.rooms.find((item) => item.id === roomId);
-                if (level && room) openHit({ floor: level, room });
-              }}
-            />
-          )}
-          {nav !== "command" && nav !== "staff" && nav !== "capacity" && nav !== "flow" && nav !== "incidents" && nav !== "reports" && (
           <div
             ref={mapRef}
-            className={`map-stage${rightOpen ? " has-detail" : ""}${liveMap ? " is-live" : ""}`}
+            className={`map-stage${rightOpen ? " has-detail" : ""} is-live`}
             onClick={() => {
               setSearchOpen(false);
               setBellOpen(false);
@@ -1243,6 +1177,14 @@ export default function CommandCenter() {
                         ? `Simulation · Synced ${Math.max(0, Math.round((syncTick - flowSyncedAt) / 1000))}s ago`
                         : "Simulation · Waiting"}
                     </span>
+                    <button
+                      type="button"
+                      className={elevatorOpen ? "live-btn is-on" : "live-btn"}
+                      aria-expanded={elevatorOpen}
+                      onClick={() => setElevatorOpen((open) => !open)}
+                    >
+                      Elevator
+                    </button>
                     <button
                       type="button"
                       className="live-btn is-on"
@@ -1335,7 +1277,7 @@ export default function CommandCenter() {
                 setTab("overview");
               }}
               onHover={setHover}
-              onElevator={() => setElevatorOpen(true)}
+              onElevator={() => setElevatorOpen((open) => !open)}
               onStair={() => setToast("Stairs stay on this floor. Use the elevator to change maps.")}
             />
 
@@ -1351,31 +1293,33 @@ export default function CommandCenter() {
                 </svg>
               </button>
             </div>
-            <div className={liveMap ? "legend legend-status" : "legend"}>
-              {liveMap ? (
-                SPACE_FILTERS.filter((item) => item.dot).map((item) => (
-                  <span key={item.id}><i className="lg-dot" style={{ background: item.dot }} /> {item.label}</span>
-                ))
-              ) : (
-                <>
-                  <span><i className="lg lg-elev" /> Elevator</span>
-                  <span><i className="lg lg-stair" /> Staircase</span>
-                  <span><i className="lg lg-wc" /> Lavatory</span>
-                </>
-              )}
+            <div className="legend legend-status">
+              {SPACE_FILTERS.filter((item) => item.dot).map((item) => (
+                <span key={item.id}><i className="lg-dot" style={{ background: item.dot }} /> {item.label}</span>
+              ))}
+              <span><i className="lg lg-elev" /> Elevator</span>
+              <span><i className="lg lg-stair" /> Stairs</span>
             </div>
-            {elevatorOpen && (
-              <ElevatorPanel
-                floors={hospital}
-                currentId={floor.id}
-                onSelect={goToFloor}
-                onClose={() => setElevatorOpen(false)}
-              />
-            )}
             {toast && (
               <button type="button" className="toast" onClick={() => setToast("")}>
                 {toast}
               </button>
+            )}
+            {elevatorOpen && (
+              <>
+                <button
+                  type="button"
+                  className="cab-backdrop"
+                  aria-label="Close elevator"
+                  onClick={() => setElevatorOpen(false)}
+                />
+                <ElevatorPanel
+                  floors={hospital}
+                  currentId={floor.id}
+                  onSelect={goToFloor}
+                  onClose={() => setElevatorOpen(false)}
+                />
+              </>
             )}
             </div>
 
@@ -1412,10 +1356,10 @@ export default function CommandCenter() {
                     floor={floor}
                     tab={tab}
                     onTab={setTab}
-                    occPct={occPct}
                     deptBeds={deptBeds}
+                    staff={(ops?.staff && ops.staff.length ? ops.staff : roster)}
+                    surgeOn={surgeOn}
                     movements={movements}
-                    queuePlace={queuePlace.get(selected.id) || null}
                     onClose={() => setSelectedId(null)}
                   />
                 )}
@@ -1445,21 +1389,40 @@ export default function CommandCenter() {
             )}
             </div>
           </div>
-          )}
         </main>
       </div>
     </div>
   );
 }
 
-function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], queuePlace = null, onClose }) {
-  const critical = deptBeds.filter((item) => item.status === "critical").length;
-  const available = deptBeds.filter((item) => item.status === "available").length;
-  const warning = deptBeds.filter((item) => item.status === "warning").length;
+const ROOM_TABS = [
+  { id: "overview", label: "Situation" },
+  { id: "patients", label: "Patient" },
+  { id: "history", label: "Timeline" },
+];
+
+function lookupStaff(staff, name, roomId) {
+  if (!name) return null;
+  const person = (staff || []).find((item) => item.name === name);
+  if (!person) return { name, detail: "Not on the roster", beds: [] };
+  const duty = person.on_duty ? "On duty" : "Off duty";
+  return {
+    name,
+    detail: `${person.specialty || person.role} · ${person.shift} shift · ${duty}`,
+    beds: (person.patients || []).filter((id) => id !== roomId),
+  };
+}
+
+function RoomCard({ room, floor, tab, onTab, deptBeds, staff = [], surgeOn = false, movements = [], onClose }) {
   const vitals = vitalsFor(room);
-  const plan = planFor(room);
   const history = historyFor(room, movements);
   const occupied = Boolean(room.patient);
+  const situation = situationFor(room, floor);
+  const attending = lookupStaff(staff, room.physician, room.id);
+  const nurse = lookupStaff(staff, room.nurse, room.id);
+  const censusBeds = deptBeds.filter((item) => item.census);
+  const openBeds = censusBeds.filter((item) => item.status === "available").length;
+  const criticalBeds = censusBeds.filter((item) => item.status === "critical").length;
 
   return (
     <div>
@@ -1488,99 +1451,55 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], q
           src={roomVisualSrc(room)}
           alt={`${room.type} interior`}
         />
-        <span className="bed-sketch-size">
-          {room.w.toFixed(2)} × {room.h.toFixed(2)} m · {room.area.toFixed(1)} m²
-        </span>
       </div>
 
       <div className="tabs">
-        {["overview", "patients", "history"].map((item) => (
+        {ROOM_TABS.map((item) => (
           <button
-            key={item}
+            key={item.id}
             type="button"
-            className={tab === item ? "is-on" : ""}
-            onClick={() => onTab(item)}
+            className={tab === item.id ? "is-on" : ""}
+            onClick={() => onTab(item.id)}
           >
-            {item}
+            {item.label}
           </button>
         ))}
       </div>
 
       {tab === "overview" && (
         <div className="sheet">
-          {occupied && (
-            <div className="detail-callout">
-              <p className="kicker">Now in this bed</p>
-              <strong>{room.patient}</strong>
-              <span>{room.diagnosis || room.chiefComplaint || STATUS[room.status]?.label}</span>
-            </div>
+          <div className={`situation-band ${situation.tone}`}>
+            <strong>{situation.band}{situation.detail ? ` · ${situation.detail}` : ""}</strong>
+            <span>{situation.why}</span>
+          </div>
+          {situation.owner && <Meta label="Owner">{situation.owner}</Meta>}
+          {situation.ready && <Meta label="Ready in">{situation.ready}</Meta>}
+          {room.surge && room.census && (
+            <Meta label="Incoming">Held for incoming casualties</Meta>
           )}
-
-          <Meta label="Bed">{room.census ? "1 inpatient bed" : "Non-census space"}</Meta>
-          <Meta label="Room type">{room.type}</Meta>
-          <Meta label="Department">{room.deptLabel}</Meta>
-          <Meta label="Floor">{floor.name}</Meta>
-          <Meta label="Area">{room.area.toFixed(1)} m²</Meta>
-          <Meta label="Surge ready">{room.surge ? "Yes — holds open for MCI" : "Standard"}</Meta>
-          {room.census && (
-            <Meta label="Bed status">{STATUS[room.status]?.label || "—"}</Meta>
+          {room.census && censusBeds.length > 0 && (
+            <Meta label="Unit">
+              {`${room.deptLabel}: ${openBeds} of ${censusBeds.length} beds open · ${criticalBeds} critical`}
+            </Meta>
           )}
-          {room.status === "cleaning" && (
-            <>
-              <Meta label="Clean type">{cleanLabel(room.cleanType)}</Meta>
-              <Meta label="Housekeeper">{keeperLabel(room, queuePlace)}</Meta>
-              <Meta label="Time left">{ticksLabel(room.ticksLeft)}</Meta>
-              <Meta label="Linen">{room.linenAide ? `${room.linenAide} · ${linenLabel(room.linenStage)}` : linenLabel(room.linenStage)}</Meta>
-              <Meta label="Linen time">{room.linenStage === "ready" ? "Here" : ticksLabel(room.linenTicks)}</Meta>
-            </>
-          )}
-
-          {room.census && deptBeds.length > 0 && (
-            <div className="donut-row">
-              <svg viewBox="0 0 36 36" className="donut">
-                <circle cx="18" cy="18" r="14" fill="none" stroke="#dde4ee" strokeWidth="4" />
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="none"
-                  stroke="#4a78b0"
-                  strokeWidth="4"
-                  strokeDasharray={`${occPct} ${100 - occPct}`}
-                  strokeDashoffset="25"
-                  pathLength="100"
-                />
-                <text x="18" y="20" textAnchor="middle" fontSize="8" fontWeight="600" fill="#020c21">
-                  {occPct}%
-                </text>
-              </svg>
-              <div>
-                <p className="kicker">Unit occupancy · {room.deptLabel}</p>
-                <ul>
-                  <li><i className="amber" /> Occupied {deptOccupiedSafe(deptBeds)}</li>
-                  <li><i className="teal" /> Available {available}</li>
-                  <li><i className="red" /> Critical {critical}</li>
-                  <li><i className="slate" /> Watch {warning}</li>
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {(room.physician || room.charge || room.nurse) && (
+          {(attending || nurse || room.charge) && (
             <div className="team">
-              <p className="kicker">Care team</p>
-              {room.physician && <p>Attending · {room.physician}</p>}
-              {room.nurse && <p>Primary nurse · {room.nurse}</p>}
+              <p className="kicker">Who is here</p>
+              {attending && (
+                <>
+                  <p>Attending · {attending.name}</p>
+                  <p>{attending.detail}</p>
+                  {attending.beds.length > 0 && <p>Also covering {attending.beds.join(", ")}</p>}
+                </>
+              )}
+              {nurse && (
+                <>
+                  <p>Primary nurse · {nurse.name}</p>
+                  <p>{nurse.detail}</p>
+                  {nurse.beds.length > 0 && <p>Also covering {nurse.beds.join(", ")}</p>}
+                </>
+              )}
               {room.charge && <p>Charge nurse · {room.charge}</p>}
-            </div>
-          )}
-
-          {occupied && plan.length > 0 && (
-            <div className="detail-block">
-              <p className="kicker">Immediate plan</p>
-              <ul className="detail-list">
-                {plan.map((step) => <li key={step}>{step}</li>)}
-              </ul>
             </div>
           )}
         </div>
@@ -1591,23 +1510,17 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], q
           {occupied ? (
             <>
               <div className="detail-callout">
-                <p className="kicker">Chief complaint</p>
-                <strong>{room.chiefComplaint || "Not documented"}</strong>
+                <p className="kicker">{room.patient}{room.age != null ? ` · ${room.age} yrs` : ""}</p>
+                <strong>{room.chiefComplaint || "Complaint not documented"}</strong>
                 <span>{room.diagnosis || "Working diagnosis pending"}</span>
               </div>
-
-              <Meta label="Patient">{room.patient}</Meta>
-              <Meta label="Age">{room.age != null ? `${room.age} yrs` : "—"}</Meta>
-              <Meta label="Acuity">{STATUS[room.status]?.label || room.acuity || "—"}</Meta>
-              <Meta label="Triage">{esiFor(room.status)}</Meta>
-              <Meta label="OR needed">{room.needsOr ? "Yes — hold requested" : "No"}</Meta>
-              <Meta label="Attending">{room.physician || "—"}</Meta>
-              <Meta label="Primary nurse">{room.nurse || "—"}</Meta>
-              <Meta label="Bed">{room.id}</Meta>
-
-              {vitals && (
+              <Meta label="Acuity">{esiFor(room.status)}</Meta>
+              <Meta label="Disposition">{dispositionFor(room, surgeOn)}</Meta>
+              <Meta label="Attending">{attending ? `${attending.name} · ${attending.detail}` : "—"}</Meta>
+              <Meta label="Primary nurse">{nurse ? `${nurse.name} · ${nurse.detail}` : "—"}</Meta>
+              {vitals ? (
                 <div className="detail-block">
-                  <p className="kicker">Latest vitals</p>
+                  <p className="kicker">Last recorded</p>
                   <div className="vital-grid">
                     <div><span>HR</span><strong>{vitals.hr}</strong></div>
                     <div><span>BP</span><strong>{vitals.bp}</strong></div>
@@ -1616,37 +1529,14 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], q
                     <div><span>Temp</span><strong>{vitals.temp}</strong></div>
                   </div>
                 </div>
-              )}
-
-              <div className="detail-block">
-                <p className="kicker">Clinical summary</p>
-                <p className="detail-copy">
-                  {room.patient} is a {room.age != null ? `${room.age}-year-old` : "adult"} presenting with{" "}
-                  {(room.chiefComplaint || "an acute complaint").toLowerCase()}. Current working diagnosis:{" "}
-                  {room.diagnosis || "under evaluation"}. Acuity is {STATUS[room.status]?.label?.toLowerCase() || "active"}
-                  {room.needsOr ? "; surgical intervention may be required." : "."}
-                </p>
-              </div>
-
-              {plan.length > 0 && (
-                <div className="detail-block">
-                  <p className="kicker">Care plan</p>
-                  <ul className="detail-list">
-                    {plan.map((step) => <li key={step}>{step}</li>)}
-                  </ul>
-                </div>
+              ) : (
+                <p className="detail-copy">Vitals are not recorded.</p>
               )}
             </>
           ) : (
             <div className="detail-empty">
-              <p className="kicker">No patient assigned</p>
-              <p className="detail-copy">
-                {room.status === "cleaning"
-                  ? "This bed is closed for cleaning. It stays closed until housekeeping finishes and clean linen arrives."
-                  : room.census
-                    ? "This bed is open for assignment. Declare surge or wait for the next admit from triage."
-                    : "This space is not an inpatient bed — use it for support workflow only."}
-              </p>
+              <p className="kicker">{room.census ? "No patient assigned" : "Not a bed"}</p>
+              <p className="detail-copy">{situation.why}</p>
             </div>
           )}
         </div>
@@ -1654,22 +1544,22 @@ function RoomCard({ room, floor, tab, onTab, occPct, deptBeds, movements = [], q
 
       {tab === "history" && (
         <div className="sheet">
-          <p className="kicker">Room timeline</p>
-          <ul className="activity">
-            {history.map((item) => (
-              <li key={`${item.time}-${item.text}`}>
-                <strong>{item.time}</strong>
-                <span>{item.text}</span>
-                <em>{item.tag}</em>
-              </li>
-            ))}
-          </ul>
+          <p className="kicker">Timeline</p>
+          {history.length === 0 ? (
+            <p className="detail-copy">No events recorded yet.</p>
+          ) : (
+            <ul className="activity">
+              {history.map((item) => (
+                <li key={`${item.time}-${item.text}`}>
+                  <strong>{item.time}</strong>
+                  <span>{item.text}</span>
+                  <em>{item.tag}</em>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function deptOccupiedSafe(beds) {
-  return beds.filter((item) => ["critical", "warning", "normal"].includes(item.status)).length;
 }
