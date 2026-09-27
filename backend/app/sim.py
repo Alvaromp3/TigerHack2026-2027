@@ -3,6 +3,7 @@
 import logging
 import random
 import threading
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
@@ -725,9 +726,20 @@ def _die(db: Session, patient: Patient):
 
 
 def repair_census(db: Session) -> list[str]:
-    """Startup pass: fix whatever an older build or an interrupted tick left behind."""
+    """Startup pass: fix whatever an older build or an interrupted tick left behind.
+
+    The instance still serving holds this lock while it ticks. Waiting on it used
+    to hit lock_timeout and abort startup, so Render never opened the port.
+    """
     with write_lock:
-        _serialize(db)
+        for _ in range(8):
+            if _serialize(db, wait=False):
+                break
+            db.rollback()
+            time.sleep(0.4)
+        else:
+            log.warning("census repair skipped; another process holds the census lock")
+            return []
         fixed = reconcile_census(db)
         _assign_housekeepers(db)
         _assign_linen(db)

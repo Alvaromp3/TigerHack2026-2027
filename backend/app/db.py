@@ -1,3 +1,4 @@
+import logging
 import time
 
 from sqlalchemy import create_engine, text
@@ -5,6 +6,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+
+log = logging.getLogger(__name__)
 
 engine = create_engine(
     settings.database_url,
@@ -119,20 +122,65 @@ def _add_column(conn, table, column, ddl):
             time.sleep(0.4 * (attempt + 1))
 
 
+def _lock_conflict(exc: BaseException) -> bool:
+    orig = getattr(exc, "orig", None)
+    state = getattr(orig, "sqlstate", None)
+    # 55P03 lock_not_available, 40P01 deadlock_detected
+    if state in {"55P03", "40P01"}:
+        return True
+    name = type(orig).__name__ if orig is not None else ""
+    return name in {"LockNotAvailable", "DeadlockDetected"}
+
+
+def _schema_current(conn) -> bool:
+    return all(_column_exists(conn, table, column) for table, column, _ddl in _COLUMN_PATCHES)
+
+
 def _ensure_columns():
+    """Patch columns left behind by older deploys.
+
+    A normal restart, when every column already exists, takes no lock. The
+    instance still serving holds table locks while it ticks; waiting on those
+    used to deadlock or time out and kill startup before the port opened.
+    """
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": _MIGRATION_LOCK})
+        if _schema_current(conn):
+            return
+        locked = False
+        for _ in range(12):
+            locked = bool(conn.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": _MIGRATION_LOCK}))
+            if locked:
+                break
+            time.sleep(0.5)
+        if not locked:
+            log.warning("schema patch skipped; another process is migrating")
+            return
         try:
+            if _schema_current(conn):
+                return
             conn.execute(text("SET lock_timeout = '2s'"))
             for table, column, ddl in _COLUMN_PATCHES:
                 _add_column(conn, table, column, ddl)
             for sql in _BACKFILLS:
                 _retry(conn, text(sql))
+        except OperationalError as exc:
+            if not _lock_conflict(exc):
+                raise
+            log.warning("schema patch hit a lock held by the instance still serving")
         finally:
             conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _MIGRATION_LOCK})
 
 
 def init_db():
+    try:
+        _open_database()
+    except OperationalError as exc:
+        if not _lock_conflict(exc):
+            raise
+        log.warning("database startup hit a lock held by the instance still serving; continuing")
+
+
+def _open_database():
     from app.catalog import random_case
     from app.db_seed import seed_if_empty
     from app.models import Base
@@ -156,7 +204,13 @@ def init_db():
         db.commit()
         from app.sim import repair_census
 
-        repair_census(db)
+        try:
+            repair_census(db)
+        except OperationalError as exc:
+            db.rollback()
+            if not _lock_conflict(exc):
+                raise
+            log.warning("census repair skipped; another process holds the census lock")
 
 
 def seed_staff_if_empty(db):
