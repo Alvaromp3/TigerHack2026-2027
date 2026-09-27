@@ -2,15 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ElevatorPanel from "./ElevatorPanel";
 import FloorPlan from "./FloorPlan";
 import ChatPanel from "./ChatPanel";
-import CommandRail from "./CommandRail";
 import {
   NURSE_LOAD,
-  buildActions,
   formatEta,
   turnoverPlan,
   censusRooms,
   earlyWarning,
-  forecast,
   stayLabel,
 } from "./insights";
 import {
@@ -69,169 +66,6 @@ const SFX_BY_ROOM_ID = {
   ADMIN: "Trump.mp3",
 };
 
-const VOICE = {
-  wait: [
-    "voice-01-three-hours.mp3",
-    "voice-02-waiting-room.mp3",
-    "voice-13-five-minutes.mp3",
-    "voice-19-number.mp3",
-    "voice-24-still.mp3",
-  ],
-  family: [
-    "voice-43-family.mp3",
-    "voice-01-three-hours.mp3",
-    "voice-02-waiting-room.mp3",
-    "voice-13-five-minutes.mp3",
-  ],
-  clinic: [
-    "voice-03-psychological.mp3",
-    "voice-07-smile.mp3",
-    "voice-11-big-toe.mp3",
-    "voice-16-ulcer.mp3",
-    "voice-17-knee.mp3",
-    "voice-31-sneeze.mp3",
-    "voice-34-my-name.mp3",
-    "voice-40-listened.mp3",
-    "voice-33-thank-you.mp3",
-    "voice-42-five-stars.mp3",
-  ],
-  pharmacy: [
-    "voice-04-same-pill.mp3",
-    "voice-22-pills.mp3",
-    "voice-23-extra.mp3",
-  ],
-  icu: [
-    "voice-08-beeping.mp3",
-    "voice-37-not-scared.mp3",
-    "voice-39-breathe.mp3",
-    "voice-47-safe.mp3",
-    "voice-38-kind-team.mp3",
-    "voice-36-warm-blanket.mp3",
-  ],
-  or: [
-    "voice-14-gown.mp3",
-    "voice-37-not-scared.mp3",
-    "voice-39-breathe.mp3",
-  ],
-  ward: [
-    "voice-28-deluxe.mp3",
-    "voice-36-warm-blanket.mp3",
-    "voice-44-how-i-slept.mp3",
-    "voice-45-pain-two.mp3",
-    "voice-46-gentle-floor.mp3",
-    "voice-41-discharge.mp3",
-    "voice-35-pain-gone.mp3",
-    "voice-33-thank-you.mp3",
-  ],
-  surgWard: [
-    "voice-14-gown.mp3",
-    "voice-26-bandage.mp3",
-    "voice-35-pain-gone.mp3",
-    "voice-36-warm-blanket.mp3",
-    "voice-44-how-i-slept.mp3",
-    "voice-45-pain-two.mp3",
-    "voice-46-gentle-floor.mp3",
-    "voice-41-discharge.mp3",
-  ],
-  pacu: [
-    "voice-35-pain-gone.mp3",
-    "voice-36-warm-blanket.mp3",
-    "voice-39-breathe.mp3",
-    "voice-14-gown.mp3",
-    "voice-41-discharge.mp3",
-  ],
-  imaging: [
-    "voice-18-xray.mp3",
-    "voice-48-found-it.mp3",
-  ],
-  ed: [
-    "voice-09-quick.mp3",
-    "voice-26-bandage.mp3",
-    "voice-27-ice.mp3",
-    "voice-06-leaving.mp3",
-    "voice-31-sneeze.mp3",
-    "voice-45-pain-two.mp3",
-  ],
-  trauma: [
-    "voice-08-beeping.mp3",
-    "voice-09-quick.mp3",
-    "voice-26-bandage.mp3",
-    "voice-27-ice.mp3",
-    "voice-37-not-scared.mp3",
-    "voice-47-safe.mp3",
-  ],
-  observe: [
-    "voice-10-observe.mp3",
-    "voice-09-quick.mp3",
-    "voice-45-pain-two.mp3",
-  ],
-  nurse: [
-    "voice-05-phone.mp3",
-    "voice-30-clipboard.mp3",
-    "voice-32-intern.mp3",
-    "voice-38-kind-team.mp3",
-    "voice-29-coffee.mp3",
-  ],
-  lounge: [
-    "voice-12-vacation.mp3",
-    "voice-29-coffee.mp3",
-    "voice-32-intern.mp3",
-  ],
-  pt: [
-    "voice-17-knee.mp3",
-    "voice-27-ice.mp3",
-    "voice-35-pain-gone.mp3",
-  ],
-  conference: [
-    "voice-21-meeting.mp3",
-    "voice-20-paperwork.mp3",
-    "voice-25-loyalty.mp3",
-  ],
-  admin: [
-    "voice-15-bill.mp3",
-    "voice-20-paperwork.mp3",
-    "voice-25-loyalty.mp3",
-    "voice-42-five-stars.mp3",
-  ],
-  triage: [
-    "voice-09-quick.mp3",
-    "voice-19-number.mp3",
-    "voice-01-three-hours.mp3",
-    "voice-31-sneeze.mp3",
-  ],
-};
-
-const VOICES_BY_TYPE = {
-  "Waiting room": VOICE.wait,
-  "Clinic waiting": VOICE.wait,
-  "Family waiting": VOICE.family,
-  "Exam room": VOICE.clinic,
-  Pharmacy: VOICE.pharmacy,
-  "Floor pharmacy": VOICE.pharmacy,
-  "Medication room": VOICE.pharmacy,
-  "ICU — Single": VOICE.icu,
-  "Operating room": VOICE.or,
-  Scrub: VOICE.or,
-  "Post-anesthesia recovery": VOICE.pacu,
-  "X-ray": VOICE.imaging,
-  "CT suite": VOICE.imaging,
-  "MRI suite": VOICE.imaging,
-  Control: VOICE.imaging,
-  "ED — Exam": VOICE.ed,
-  "Fast track": VOICE.ed,
-  "ED — Trauma": VOICE.trauma,
-  Observation: VOICE.observe,
-  Triage: VOICE.triage,
-  "Nurse station": VOICE.nurse,
-  "Staff station": VOICE.nurse,
-  "Staff lounge": VOICE.lounge,
-  "Support room": VOICE.lounge,
-  "PT gym": VOICE.pt,
-  Conference: VOICE.conference,
-  "Board room": VOICE.conference,
-  "Medical director": VOICE.admin,
-};
-
 const AMBIENT_BY_TYPE = {
   Restroom: null,
   Equipment: "Storage.mp3",
@@ -247,26 +81,8 @@ const AMBIENT_BY_TYPE = {
   "Stat lab": "Clinic.mp3",
 };
 
-function pickClip(room, list) {
-  if (!list?.length) return null;
-  let hash = 0;
-  for (let i = 0; i < room.id.length; i += 1) {
-    hash = (Math.imul(hash, 31) + room.id.charCodeAt(i)) >>> 0;
-  }
-  return list[hash % list.length];
-}
-
-function voiceForRoom(room) {
-  if (room.type === "Med/Surg — Single") {
-    return pickClip(room, room.dept === "surgward" ? VOICE.surgWard : VOICE.ward);
-  }
-  return pickClip(room, VOICES_BY_TYPE[room.type]);
-}
-
 function sfxForRoom(room) {
   if (SFX_BY_ROOM_ID[room.id]) return SFX_BY_ROOM_ID[room.id];
-  const voice = voiceForRoom(room);
-  if (voice) return voice;
   if (Object.prototype.hasOwnProperty.call(AMBIENT_BY_TYPE, room.type)) return AMBIENT_BY_TYPE[room.type];
   return SFX_BY_DEPARTMENT[room.dept] || null;
 }
@@ -662,11 +478,6 @@ export default function CommandCenter() {
   const roomIds = useMemo(
     () => new Set(hospital.flatMap((level) => level.rooms.map((room) => room.id))),
     [hospital],
-  );
-  const outlook = useMemo(() => forecast(allBeds), [allBeds]);
-  const actions = useMemo(
-    () => buildActions({ rooms: allBeds, ops, surgeOn, calledPhysicians, incidents: openIncidents }),
-    [allBeds, ops, surgeOn, calledPhysicians, openIncidents],
   );
   const mix = useMemo(() => bedMix(allBeds), [allBeds]);
   const floors = useMemo(() => floorRows(hospital), [hospital]);
@@ -1256,7 +1067,7 @@ export default function CommandCenter() {
     day: "numeric",
     year: "numeric",
   });
-  const rightOpen = liveMap || Boolean(selected) || Boolean(note);
+  const rightOpen = Boolean(selected) || Boolean(note);
 
   function openMovement(event) {
     if (!event.room_id) return;
@@ -1774,16 +1585,6 @@ export default function CommandCenter() {
                   />
                 )}
 
-                {!note && !selected && (
-                  <CommandRail
-                    outlook={outlook}
-                    actions={actions}
-                    busy={surgeBusy}
-                    surgeOn={surgeOn}
-                    onRun={runRailAction}
-                    onOpenRoom={openRoomById}
-                  />
-                )}
               </aside>
             )}
 
