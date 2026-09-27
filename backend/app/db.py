@@ -214,31 +214,60 @@ def _open_database():
 
 
 def seed_staff_if_empty(db):
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from app.models import Staff
 
-    existing = db.scalar(select(func.count()).select_from(Staff))
-    if existing:
-        return
     roster = [
         ("Dr. Leena Patel", "physician", "icu", "Critical care", "day", True, "4101"),
+        ("Dr. Omar Desta", "physician", "icu", "Critical care", "day", True, "4104"),
         ("RN Maya Chen", "nurse", "icu", "ICU", "day", True, "4102"),
         ("RN Chris Novak", "nurse", "icu", "ICU", "day", True, "4103"),
+        ("RN Imani Diaz", "nurse", "icu", "ICU", "day", True, "4105"),
         ("RN Adeyemi Cole", "charge", "icu", "Charge nurse", "day", True, "4100"),
         ("Dr. Jonah Okonkwo", "physician", "ed", "Emergency medicine", "day", True, "1101"),
+        ("Dr. Amina Diallo", "physician", "ed", "Emergency medicine", "day", True, "1111"),
+        ("Dr. Keisha Ward", "physician", "ed", "Emergency medicine", "day", True, "1112"),
+        ("Dr. Luis Ortega", "physician", "ed", "Emergency medicine", "day", True, "1113"),
+        ("Dr. Hannah Berg", "physician", "ed", "Emergency medicine", "day", True, "1114"),
+        ("Dr. Samuel Cho", "physician", "ed", "Emergency medicine", "day", True, "1115"),
+        ("Dr. Fatima Okeke", "physician", "ed", "Emergency medicine", "day", True, "1116"),
         ("RN Elena Brooks", "nurse", "ed", "Emergency", "day", True, "1102"),
         ("RN Jonah Blake", "nurse", "ed", "Trauma", "day", True, "1103"),
+        ("RN Sofia Lang", "nurse", "ed", "Emergency", "day", True, "1104"),
+        ("RN Owen Clarke", "nurse", "ed", "Emergency", "day", True, "1105"),
+        ("RN Ruth Ferreira", "nurse", "ed", "Emergency", "day", True, "1106"),
+        ("RN Malik Santos", "nurse", "ed", "Emergency", "day", True, "1107"),
+        ("RN Chloe Reddy", "nurse", "ed", "Emergency", "day", True, "1109"),
+        ("RN Yara Nguyen", "nurse", "ed", "Emergency", "day", True, "1117"),
         ("RN Weiss Adler", "charge", "ed", "Charge nurse", "day", True, "1100"),
         ("Dr. Amir Shah", "physician", "med", "Hospital medicine", "day", True, "2101"),
+        ("Dr. Elena Voss", "physician", "med", "Hospital medicine", "day", True, "2104"),
+        ("Dr. Andre Nair", "physician", "med", "Hospital medicine", "day", True, "2105"),
+        ("Dr. Mei Ortiz", "physician", "med", "Hospital medicine", "day", True, "2106"),
+        ("Dr. Daniel Ibrahim", "physician", "med", "Hospital medicine", "day", True, "2110"),
         ("RN Luis Ibarra", "nurse", "med", "Med/Surg", "day", True, "2102"),
         ("RN Priya Raman", "nurse", "med", "Med/Surg", "day", True, "2103"),
+        ("RN Felix Haddad", "nurse", "med", "Med/Surg", "day", True, "2107"),
+        ("RN Ines Keller", "nurse", "med", "Med/Surg", "day", True, "2108"),
+        ("RN Ravi Petrov", "nurse", "med", "Med/Surg", "day", True, "2109"),
+        ("RN Amara Cohen", "nurse", "med", "Med/Surg", "day", True, "2111"),
         ("Dr. Camila Alvarez", "physician", "surg", "General surgery", "day", True, "3101"),
+        ("Dr. Paul Kim", "physician", "surg", "General surgery", "day", True, "3102"),
+        ("Dr. Nora Abebe", "physician", "surg", "General surgery", "day", True, "3103"),
+        ("Dr. Victor Santos", "physician", "surg", "General surgery", "day", True, "3105"),
+        ("RN Grace Walsh", "nurse", "surg", "Surgical", "day", True, "3106"),
+        ("RN Diego Tanaka", "nurse", "surg", "Surgical", "day", True, "3107"),
+        ("RN Leah Moreau", "nurse", "surg", "Surgical", "day", True, "3108"),
+        ("RN Hassan Cole", "nurse", "surg", "Surgical", "day", True, "3109"),
         ("Dr. Helen Cho", "physician", "surg", "Orthopedics", "night", False, "3104"),
         ("RN Nora Kim", "nurse", "icu", "ICU", "night", False, "4108"),
         ("RN Mateo Ruiz", "nurse", "ed", "Emergency", "night", False, "1108"),
     ]
+    known = set(db.scalars(select(Staff.name)).all())
     for name, role, unit, specialty, shift, on_duty, extension in roster:
+        if name in known:
+            continue
         db.add(Staff(
             name=name,
             role=role,

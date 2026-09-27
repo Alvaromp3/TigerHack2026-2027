@@ -28,7 +28,6 @@ import AmbulancesTab from "./AmbulancesTab";
 import { AppNav } from "./AppBar";
 import NetworkTab from "./NetworkTab";
 import OpenDataTab from "./OpenDataTab";
-import OpsTab from "./OpsTab";
 import OverviewTab from "./OverviewTab";
 import { ESI, countdown } from "./network/ems";
 import { bedMix, floorRows, localBriefing } from "./ui";
@@ -513,7 +512,6 @@ export default function CommandCenter() {
       totals: insights?.totals,
     });
   }
-  const opsBadge = allBeds.filter((room) => room.status === "cleaning" && !room.housekeeper && room.ticksLeft !== 0).length;
   const waitingClean = useMemo(() => cleanQueue(hospital), [hospital]);
   const queuePlace = useMemo(() => {
     const places = new Map();
@@ -1106,7 +1104,7 @@ export default function CommandCenter() {
           active={nav}
           onChange={chooseNav}
           live={flowLive}
-          badges={{ ops: opsBadge, ambulances: incoming.filter((run) => run.status !== "arrived").length }}
+          badges={{ ambulances: incoming.filter((run) => run.status !== "arrived").length }}
         />
 
         <div className="ab-tools">
@@ -1320,21 +1318,6 @@ export default function CommandCenter() {
             />
           )}
           {nav === "data" && <OpenDataTab />}
-          {nav === "ops" && (
-            <OpsTab
-              beds={allBeds}
-              insights={insights}
-              ops={ops}
-              incidents={openIncidents}
-              busy={surgeBusy}
-              onOpenRoom={openRoomById}
-              onAssign={(room, keeper) =>
-                runRailAction({ id: `assign:${room.id}`, gain: "+1 bed soon", run: { kind: "assign", roomId: room.id, keeperId: keeper.id } })}
-              onComplete={(room) => runRailAction({ id: `open:${room.id}`, run: { kind: "complete", roomId: room.id } })}
-              onResolve={(incident) =>
-                runRailAction({ id: `incident:${incident.id}`, roomId: incident.room_id, run: { kind: "resolve", incidentId: incident.id } })}
-            />
-          )}
           {nav !== "live" && (
             <footer className="page-foot">
               <span>

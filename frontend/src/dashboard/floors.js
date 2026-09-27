@@ -104,10 +104,32 @@ const PATIENTS = (() => {
   return pool;
 })();
 const TEAMS = {
-  icu: { physician: "Dr. Leena Patel", nurses: ["RN Maya Chen", "RN Chris Novak"], charge: "RN Adeyemi" },
-  ed: { physician: "Dr. Jonah Okonkwo", nurses: ["RN Elena Brooks", "RN Jonah Blake"], charge: "RN Weiss" },
-  med: { physician: "Dr. Amir Shah", nurses: ["RN Luis Ibarra", "RN Priya Raman"], charge: "RN Adeyemi" },
-  surg: { physician: "Dr. Camila Alvarez", nurses: ["RN Priya Raman", "RN Luis Ibarra"], charge: "RN Weiss" },
+  icu: {
+    physicians: ["Dr. Leena Patel", "Dr. Omar Desta"],
+    nurses: ["RN Maya Chen", "RN Chris Novak", "RN Imani Diaz"],
+    charge: "RN Adeyemi",
+  },
+  ed: {
+    physicians: [
+      "Dr. Jonah Okonkwo", "Dr. Amina Diallo", "Dr. Keisha Ward", "Dr. Luis Ortega",
+      "Dr. Hannah Berg", "Dr. Samuel Cho", "Dr. Fatima Okeke",
+    ],
+    nurses: [
+      "RN Elena Brooks", "RN Jonah Blake", "RN Sofia Lang", "RN Owen Clarke",
+      "RN Ruth Ferreira", "RN Malik Santos", "RN Chloe Reddy", "RN Yara Nguyen",
+    ],
+    charge: "RN Weiss",
+  },
+  med: {
+    physicians: ["Dr. Amir Shah", "Dr. Elena Voss", "Dr. Andre Nair", "Dr. Mei Ortiz", "Dr. Daniel Ibrahim"],
+    nurses: ["RN Luis Ibarra", "RN Priya Raman", "RN Felix Haddad", "RN Ines Keller", "RN Ravi Petrov", "RN Amara Cohen"],
+    charge: "RN Adeyemi",
+  },
+  surg: {
+    physicians: ["Dr. Camila Alvarez", "Dr. Paul Kim", "Dr. Nora Abebe", "Dr. Victor Santos"],
+    nurses: ["RN Grace Walsh", "RN Diego Tanaka", "RN Leah Moreau", "RN Hassan Cole"],
+    charge: "RN Weiss",
+  },
 };
 
 function area(w, h) {
@@ -576,8 +598,8 @@ export function applySurge(hospital) {
           ...room,
           status: "critical",
           patient: unusedName(used),
-          physician: crew.physician,
-          nurse: crew.nurses[0],
+          physician: crew.physicians[flipped % crew.physicians.length],
+          nurse: crew.nurses[flipped % crew.nurses.length],
           activity: [
             { time: "10:24", text: "Assigned from train collision surge", tag: "Command" },
             { time: "10:24", text: "Bed held for incoming critical", tag: "Charge nurse" },

@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import sim
-from app.catalog import crew, fresh_patient_name
+from app.catalog import fresh_patient_name
 from app.models import AmbulanceRun, FacilityStatus, Patient, Room
 
 HOME = "Tiger Memorial"
@@ -555,7 +555,7 @@ def handoff(db: Session, run: AmbulanceRun, actor: str) -> AmbulanceRun:
         names = set(db.scalars(select(Patient.name)).all())
         name = run.patient_name if run.patient_name not in names else fresh_patient_name(names, run.id)
         acuity = ACUITY_BY_ESI.get(run.esi, "normal")
-        physician, nurse = crew("ed", run.id % 2)
+        physician, nurse = sim.next_crew(db, "ed")
         reading = sim.vital_set(acuity, run.id)
         reading.update({
             key: value for key, value in (
