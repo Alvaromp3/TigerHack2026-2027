@@ -23,7 +23,7 @@ function PublicBoard() {
           <span className="ab-mark" aria-hidden="true"><img src={logo} alt="" /></span>
           <div>
             <strong>Tiger Region</strong>
-            <small>Hospital availability</small>
+            <small>Hospital availability · by RightDoor</small>
           </div>
         </div>
         <span className={region.offline ? "public-live is-off" : "public-live"}>

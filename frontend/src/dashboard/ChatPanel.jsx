@@ -125,11 +125,11 @@ export default function ChatPanel({ open, onClose, roomIds, onOpenRoom }) {
   const time = (at) => at?.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   return (
-    <div className="assist-sheet" role="dialog" aria-label="SurgeCommand AI">
+    <div className="assist-sheet" role="dialog" aria-label="RightDoor AI">
       <header className="assist-head">
         <AiMark size={38} className="assist-logo" />
         <div className="assist-title">
-          <strong>SurgeCommand AI</strong>
+          <strong>RightDoor AI</strong>
           <small>
             <i className={status.configured ? "is-on" : ""} />
             {status.configured ? "Reads the live database · 10 tables" : "Offline · API key missing on the server"}

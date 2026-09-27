@@ -8,7 +8,7 @@ router = APIRouter()
 @router.get("/", include_in_schema=False)
 def read_root():
     return {
-        "service": "SurgeCommand Hospital Operations API",
+        "service": "RightDoor Hospital Operations API",
         "version": VERSION,
         "hospital": "Tiger Memorial Hospital",
         "docs": "/docs",

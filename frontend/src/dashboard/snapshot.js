@@ -1,6 +1,6 @@
 // Last known state, kept in this browser so the next visit paints instantly while the API wakes up.
 // It is only a head start: every screen says "last snapshot" until the live census answers.
-const KEY = "surgecommand:snapshot:v1";
+const KEY = "rightdoor:snapshot:v1";
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 // Ambulances move fast; older than this and the countdowns would be wrong, so they are dropped.
 const RUNS_MAX_AGE_MS = 3 * 60 * 1000;

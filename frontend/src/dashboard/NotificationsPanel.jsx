@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { ESI, UNIT_ORDER, countdown } from "./network/ems";
 import { NO_ANSWER_LEAD_SECONDS } from "./ui";
 
-const SEEN_KEY = "surgecommand:notifications:seen";
-const DESKTOP_KEY = "surgecommand:notifications:desktop";
+const SEEN_KEY = "rightdoor:notifications:seen";
+const DESKTOP_KEY = "rightdoor:notifications:desktop";
 // Flow event kinds worth a line in the activity feed.
 const FEED_KINDS = new Set(["ems", "admit", "discharge", "transfer", "incident"]);
 

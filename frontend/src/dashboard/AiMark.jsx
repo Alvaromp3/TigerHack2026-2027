@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-// SurgeCommand AI: a heartbeat line (the live hospital) ending in a spark (the assistant).
+// RightDoor AI: a heartbeat line (the live hospital) ending in a spark (the assistant).
 // While it thinks, the line traces itself like a monitor sweep.
 export default function AiMark({ size = 32, thinking = false, className = "" }) {
   const id = useId().replace(/:/g, "");

@@ -140,7 +140,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="SurgeCommand Hospital Operations API",
+    title="RightDoor Hospital Operations API",
     summary="The operational layer of Tiger Memorial Hospital.",
     description=(
         "Hospital monitoring for better triage and ambulance communication. Every unit's live capacity is "

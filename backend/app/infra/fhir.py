@@ -241,12 +241,12 @@ def capability_statement(base: str, software_version: str) -> dict:
 
     return {
         "resourceType": "CapabilityStatement",
-        "id": "surgecommand",
+        "id": "rightdoor",
         "status": "active",
         "date": iso(datetime.now(timezone.utc)),
-        "publisher": "SurgeCommand",
+        "publisher": "RightDoor",
         "kind": "instance",
-        "software": {"name": "SurgeCommand Hospital Operations API", "version": software_version},
+        "software": {"name": "RightDoor Hospital Operations API", "version": software_version},
         "implementation": {"description": "Tiger Memorial Hospital live census (synthetic data)", "url": base},
         "fhirVersion": FHIR_VERSION,
         "format": ["json"],

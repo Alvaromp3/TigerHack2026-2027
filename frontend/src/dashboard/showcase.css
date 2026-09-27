@@ -711,7 +711,7 @@
 }
 .arr2-more:hover { background: #eef4fc; border-color: rgba(47, 95, 158, 0.45); }
 
-/* ---------- SurgeCommand AI mark ---------- */
+/* ---------- RightDoor AI mark ---------- */
 .ai-mark { display: block; flex: none; overflow: visible; }
 .ai-mark-spark { transform-box: fill-box; transform-origin: center; animation: ai-twinkle 3.6s ease-in-out infinite; }
 .ai-mark.is-thinking .ai-mark-pulse { stroke-dasharray: 34; animation: ai-trace 1.2s linear infinite; }

@@ -1229,8 +1229,8 @@ export default function CommandCenter() {
             <img src={logo} alt="" />
           </span>
           <div>
-            <strong>Tiger Memorial</strong>
-            <small>SurgeCommand</small>
+            <strong>RightDoor</strong>
+            <small>Tiger Memorial</small>
           </div>
         </div>
 
@@ -1251,7 +1251,7 @@ export default function CommandCenter() {
             <button
               type="button"
               className={chatOpen ? "ab-ask is-on" : "ab-ask"}
-              aria-label="Ask SurgeCommand AI"
+              aria-label="Ask RightDoor AI"
               onClick={() => {
                 setChatOpen((open) => !open);
                 setBellOpen(false);
@@ -1401,7 +1401,7 @@ export default function CommandCenter() {
                     ? `Showing the last snapshot (${snapshotAge(boot.at, syncTick)}) · reconnecting…`
                     : "Connecting to the live census…"}
               </span>
-              <span>SurgeCommand · Tiger Memorial Hospital</span>
+              <span>RightDoor · Tiger Memorial Hospital</span>
             </footer>
           )}
           {nav === "live" && (

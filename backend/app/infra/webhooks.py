@@ -19,8 +19,8 @@ from app.db import SessionLocal
 from app.infra.events import TYPE_PREFIX, classify, cloud_event, test_event
 from app.models import FlowEvent, WebhookDelivery, WebhookSubscription
 
-SIGNATURE_HEADER = "X-SurgeCommand-Signature"
-SUBSCRIPTION_HEADER = "X-SurgeCommand-Subscription"
+SIGNATURE_HEADER = "X-RightDoor-Signature"
+SUBSCRIPTION_HEADER = "X-RightDoor-Subscription"
 BATCH = 20
 MAX_ATTEMPTS = 3
 TIMEOUT_SECONDS = 4.0
@@ -76,7 +76,7 @@ def _post(subscription: WebhookSubscription, envelope: dict) -> tuple[int | None
     body = json.dumps(envelope, separators=(",", ":")).encode()
     headers = {
         "Content-Type": "application/cloudevents+json",
-        "User-Agent": "SurgeCommand-Webhooks/1.0",
+        "User-Agent": "RightDoor-Webhooks/1.0",
         SIGNATURE_HEADER: sign(subscription.secret, body),
         SUBSCRIPTION_HEADER: str(subscription.id),
     }

@@ -92,7 +92,7 @@ SYSTEMS = (
     },
     {
         "id": "command-center",
-        "name": "SurgeCommand console",
+        "name": "RightDoor console",
         "category": "Capacity",
         "protocol": "REST API",
         "direction": "bidirectional",
@@ -323,5 +323,5 @@ def test_event(stamp: datetime, subscription_id: int) -> dict:
         "time": iso(stamp),
         "subject": f"WebhookSubscription/{subscription_id}",
         "datacontenttype": "application/json",
-        "data": {"message": "Test event from the SurgeCommand platform."},
+        "data": {"message": "Test event from the RightDoor platform."},
     }
