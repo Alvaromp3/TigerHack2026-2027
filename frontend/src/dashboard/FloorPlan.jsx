@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { CORE, FRAME, STATUS, spaceBucket } from "./floors";
+import { cleanEtaSeconds, formatEta } from "./insights";
 
 const SHELL = "M 5 3.2 H 75.6 V 40 L 60 56.6 H 5 Z";
 
@@ -118,7 +119,10 @@ function shortName(name) {
 // What a charge nurse needs to read off the plate for one bed, in two words.
 function bedLine(room) {
   if (room.patient) return { text: shortName(room.patient), fill: "#1f3f68" };
-  if (room.status === "cleaning") return { text: "Cleaning", fill: "#5b4a8f" };
+  if (room.status === "cleaning") {
+    const eta = cleanEtaSeconds(room);
+    return { text: eta ? `Ready in ${formatEta(eta)}` : "Ready now", fill: "#5b4a8f" };
+  }
   if (room.status === "reserved") return { text: room.holdFor ? `Held · ${shortName(room.holdFor)}` : "Held", fill: "#8a6200" };
   if (room.status === "blocked") return { text: "Out of service", fill: "#374151" };
   if (room.status === "available") return { text: "Open", fill: "#1d7a4a" };
@@ -131,7 +135,7 @@ function fitLabel(text, box, preferred) {
   return Math.max(0.38, Math.min(preferred, fitted));
 }
 
-function RoomTag({ room, selected }) {
+function RoomTag({ room, selected, override }) {
   const ink = "#1c2430";
   const muted = "#4b5568";
   if (room.kind === "restroom") {
@@ -152,7 +156,7 @@ function RoomTag({ room, selected }) {
   }
   const wide = room.w >= 6.5 || room.h >= 6;
   const title = room.census ? room.id : (room.label || room.type || "");
-  const info = room.census && room.h >= 3.2 ? bedLine(room) : null;
+  const info = override || (room.census && room.h >= 3.2 ? bedLine(room) : null);
   const sub = info ? info.text : (room.h >= 5.4 && room.w >= 4.2 && wide ? shortUse(room) : "");
   const titleSize = fitLabel(title, room.w, wide ? 1.15 : 0.98);
   const subSize = sub ? fitLabel(sub, room.w, Math.min(info ? 0.56 : 0.48, titleSize * 0.66)) : 0;
@@ -224,6 +228,8 @@ export default function FloorPlan({
   onHover,
   onElevator,
   onStair,
+  emsByRoom = {},
+  emsBayActive = false,
 }) {
   const svgRef = useRef(null);
   const drag = useRef(null);
@@ -357,13 +363,20 @@ export default function FloorPlan({
           if (room.kind === "restroom") fill = "#eef2f6";
           const faded = dim || statusMiss || layerMiss;
           const marker = room.census ? STATUS[room.status] : null;
+          const incoming = emsByRoom[room.id];
+          const bay = room.id === "EMS" && emsBayActive;
+          const override = incoming
+            ? { text: incoming.label, fill: "#b42318" }
+            : bay
+              ? { text: "Ambulance at bay", fill: "#b42318" }
+              : null;
           const critical = room.census && room.status === "critical";
           const dotR = Math.min(0.4, room.w * 0.08, room.h * 0.08);
           return (
             <g
               key={room.id}
               data-room={room.id}
-              className={`map-hit${selected ? " is-selected" : ""}`}
+              className={`map-hit${selected ? " is-selected" : ""}${incoming ? " is-ems" : ""}${bay ? " is-ems-bay" : ""}`}
               opacity={faded ? (statusMiss ? 0.18 : 0.35) : 1}
             >
               <rect
@@ -376,6 +389,19 @@ export default function FloorPlan({
                 stroke={selected ? "#2f5f9e" : "#9aabbd"}
                 strokeWidth={selected ? 0.24 : 0.07}
               />
+              {(incoming || bay) && (
+                <rect
+                  className="room-ems"
+                  x={room.x + 0.1}
+                  y={room.y + 0.1}
+                  width={Math.max(0.1, room.w - 0.2)}
+                  height={Math.max(0.1, room.h - 0.2)}
+                  fill={bay ? "rgba(239, 68, 68, 0.12)" : "none"}
+                  stroke={incoming?.color || "#ef4444"}
+                  strokeWidth="0.26"
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {critical && (
                 <rect
                   className="room-pulse"
@@ -415,7 +441,7 @@ export default function FloorPlan({
               {room.kind === "restroom" && (
                 <Lavatory x={room.x + room.w / 2} y={room.y + room.h / 2 - 0.15} />
               )}
-              {showLabels && <RoomTag room={room} selected={selected} />}
+              {showLabels && <RoomTag room={room} selected={selected} override={override} />}
               {marker && (
                 <circle
                   cx={room.x + room.w - dotR - 0.3}

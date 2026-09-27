@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.infra.audit import get_actor, record
 from app.models import Incident
 from app.sim import open_incident, resolve_incident
 
@@ -36,18 +37,20 @@ def list_incidents(db: Session = Depends(get_db)):
 
 
 @router.post("/incidents")
-def create_incident(body: IncidentIn, db: Session = Depends(get_db)):
+def create_incident(body: IncidentIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     message, incident_id = open_incident(db, body.room_id, body.title, body.severity)
     if message:
         raise HTTPException(status_code=409, detail=message)
     row = db.get(Incident, incident_id)
+    record(db, actor, "incident.open", body.room_id, f"{body.severity} · {body.title.strip()}")
     return _payload(row)
 
 
 @router.post("/incidents/{incident_id}/resolve")
-def close_incident(incident_id: int, db: Session = Depends(get_db)):
+def close_incident(incident_id: int, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     message = resolve_incident(db, incident_id)
     if message:
         raise HTTPException(status_code=409, detail=message)
     row = db.get(Incident, incident_id)
+    record(db, actor, "incident.resolve", row.room_id if row else None, row.title if row else None)
     return _payload(row)

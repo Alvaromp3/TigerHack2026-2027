@@ -110,23 +110,8 @@ const TEAMS = {
   surg: { physician: "Dr. Camila Alvarez", nurses: ["RN Priya Raman", "RN Luis Ibarra"], charge: "RN Weiss" },
 };
 
-let patientCursor = 0;
-
 function area(w, h) {
   return Math.round(w * h * 10) / 10;
-}
-
-function activity(status, label) {
-  if (status === "available") return [{ time: "09:40", text: "Bed marked ready", tag: "Housekeeping" }];
-  if (status === "cleaning") return [{ time: "10:12", text: "Cleaning in progress", tag: "Housekeeping" }];
-  if (status === "critical") {
-    return [
-      { time: "10:18", text: `${label} acuity raised to critical`, tag: "Charge nurse" },
-      { time: "09:02", text: "Attending at bedside", tag: "Physician" },
-    ];
-  }
-  if (status === "warning") return [{ time: "09:48", text: "Vitals trending up", tag: "Nursing" }];
-  return [{ time: "08:15", text: "Morning round complete", tag: "Nursing" }];
 }
 
 function zone(spec) {
@@ -164,25 +149,24 @@ function furnish(room, head) {
   };
 }
 
+// A bed has no status or patient until the live census fills it in. The plate never invents one.
 function bedRoom(spec) {
-  const status = spec.status;
-  const occupied = OCCUPIED.has(status);
   const crew = TEAMS[spec.team || "med"];
   const furniture = furnish(spec, spec.head || "n");
   return {
     census: true,
     surge: false,
     kind: "bed",
-    patient: occupied ? PATIENTS[patientCursor++ % PATIENTS.length] : null,
-    physician: occupied ? crew.physician : null,
-    nurse: occupied ? crew.nurses[(spec.nurseIndex || 0) % crew.nurses.length] : null,
     charge: crew.charge,
     door: furniture.door,
     bed: furniture.bed,
     bath: furniture.bath,
     ...spec,
+    status: null,
+    patient: null,
+    physician: null,
+    nurse: null,
     area: area(spec.w, spec.h),
-    activity: activity(status, spec.id),
   };
 }
 
@@ -190,7 +174,7 @@ function tile({
   x, y, cols, rows, w, h,
   prefix, start = 1,
   dept, deptLabel, type, team = "med",
-  statuses, surge = false, census = true, head = "n", kind = "bed",
+  surge = false, census = true, head = "n", kind = "bed",
 }) {
   const rooms = [];
   let n = 0;
@@ -200,11 +184,10 @@ function tile({
       const ry = y + row * (h + GAP);
       const num = start + n;
       const id = `${prefix}-${String(num).padStart(prefix.startsWith("ED") ? 2 : 3, "0").slice(-3)}`;
-      const status = census ? statuses[n % statuses.length] : null;
       if (census) {
         rooms.push(bedRoom({
           id: prefix === "ED" || prefix === "ER" ? `${prefix}-${String(num).padStart(2, "0")}` : `${prefix}-${num}`,
-          dept, deptLabel, type, team, status, surge, head, kind,
+          dept, deptLabel, type, team, surge, head, kind,
           nurseIndex: n,
           x: rx, y: ry, w, h,
         }));
@@ -222,10 +205,6 @@ function tile({
   return rooms;
 }
 
-const MIX = ["normal", "available", "warning", "normal", "critical", "available", "cleaning", "normal", "available", "warning"];
-const ICU = ["critical", "normal", "warning", "available", "normal", "critical", "available", "normal", "cleaning", "warning", "available", "normal"];
-const ED = ["critical", "warning", "normal", "available", "critical", "available", "normal", "warning", "cleaning", "available", "normal", "available"];
-
 function wc() {
   return [
     zone({ id: "WC-1", dept: "support", deptLabel: "Restroom", type: "Restroom", kind: "restroom", x: 50.2, y: 25.6, w: 2.3, h: 1.9, label: "WC" }),
@@ -242,15 +221,15 @@ function buildF3() {
     ...tile({
       x: 5.2, y: 3.8, cols: 6, rows: 2, w: 4.6, h: 5.4,
       prefix: "ICU", start: 301, dept: "icu", deptLabel: "Intensive Care",
-      type: "ICU — Single", team: "icu", statuses: ICU, surge: true, head: "n",
+      type: "ICU — Single", team: "icu", surge: true, head: "n",
     }),
     bedRoom({
       id: "OR-1", dept: "surgery", deptLabel: "Surgery (OR)", type: "Operating room", kind: "or",
-      x: 36.2, y: 3.8, w: 7, h: 6.5, status: "warning", team: "surg", head: "n",
+      x: 36.2, y: 3.8, w: 7, h: 6.5, team: "surg", head: "n",
     }),
     bedRoom({
       id: "OR-2", dept: "surgery", deptLabel: "Surgery (OR)", type: "Operating room", kind: "or",
-      x: 43.5, y: 3.8, w: 7, h: 6.5, status: "available", team: "surg", head: "n",
+      x: 43.5, y: 3.8, w: 7, h: 6.5, team: "surg", head: "n",
     }),
     zone({ id: "SCRUB", dept: "surgery", deptLabel: "Surgery (OR)", type: "Scrub", x: 50.8, y: 3.8, w: 6.6, h: 6.5, label: "Scrub" }),
     zone({ id: "CT", dept: "imaging", deptLabel: "Radiology", type: "CT suite", x: 58.2, y: 3.8, w: 7.6, h: 4.8, label: "CT" }),
@@ -260,28 +239,28 @@ function buildF3() {
     zone({ id: "PHARM", dept: "pharmacy", deptLabel: "Pharmacy", type: "Pharmacy", x: 51.2, y: 16.4, w: 9.2, h: 6.2, label: "Pharmacy" }),
     bedRoom({
       id: "ER-T1", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 5.2, y: 16.2, w: 5.5, h: 4.6, status: "critical", team: "ed", surge: true, head: "n",
+      x: 5.2, y: 16.2, w: 5.5, h: 4.6, team: "ed", surge: true, head: "n",
     }),
     bedRoom({
       id: "ER-T2", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 11.0, y: 16.2, w: 5.5, h: 4.6, status: "warning", team: "ed", surge: true, nurseIndex: 1, head: "n",
+      x: 11.0, y: 16.2, w: 5.5, h: 4.6, team: "ed", surge: true, nurseIndex: 1, head: "n",
     }),
     ...tile({
       x: 5.2, y: 21.4, cols: 4, rows: 3, w: 3.4, h: 3.55,
       prefix: "ER", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "ED — Exam", team: "ed", statuses: ED, surge: true, head: "n",
+      type: "ED — Exam", team: "ed", surge: true, head: "n",
     }),
     ...tile({
       x: 66.2, y: 16.2, cols: 2, rows: 4, w: 4.0, h: 4.15,
       prefix: "OP", start: 1, dept: "outpatient", deptLabel: "Outpatient",
-      type: "Exam room", team: "med", statuses: MIX, census: false, head: "n",
+      type: "Exam room", team: "med", census: false, head: "n",
     }),
     zone({ id: "STERILE", dept: "surgery", deptLabel: "Surgery (OR)", type: "Sterile core", x: 36.2, y: 11.2, w: 14, h: 4.2, label: "Sterile core" }),
     zone({ id: "SUPPLY", dept: "support", deptLabel: "Support", type: "Clean utility", x: 20.5, y: 26.4, w: 10, h: 4.6, label: "Clean / soiled" }),
     ...tile({
       x: 22.2, y: 39.6, cols: 8, rows: 2, w: 4.25, h: 5.5,
       prefix: "MS", start: 301, dept: "med", deptLabel: "Medical / Surgical",
-      type: "Med/Surg — Single", team: "med", statuses: MIX, head: "s",
+      type: "Med/Surg — Single", team: "med", head: "s",
     }),
     zone({ id: "WAIT", dept: "waiting", deptLabel: "Waiting", type: "Waiting room", kind: "waiting", x: 5.2, y: 48.6, w: 15.5, h: 4, label: "Waiting" }),
     zone({ id: "LOCK", dept: "support", deptLabel: "Support", type: "Equipment", x: 58.2, y: 40.2, w: 12, h: 6.5, label: "Equipment" }),
@@ -313,12 +292,12 @@ function buildF2() {
     ...tile({
       x: 5.2, y: 3.8, cols: 12, rows: 1, w: 4.2, h: 6.4,
       prefix: "MED", start: 201, dept: "med", deptLabel: "Medicine",
-      type: "Med/Surg — Single", team: "med", statuses: MIX, head: "n",
+      type: "Med/Surg — Single", team: "med", head: "n",
     }),
     ...tile({
       x: 5.2, y: 12.8, cols: 12, rows: 1, w: 4.2, h: 6.4,
       prefix: "MED", start: 213, dept: "med", deptLabel: "Medicine",
-      type: "Med/Surg — Single", team: "med", statuses: MIX.slice().reverse(), head: "s",
+      type: "Med/Surg — Single", team: "med", head: "s",
     }),
     zone({ id: "M-NS", dept: "nurse", deptLabel: "Staff Station", type: "Nurse station", kind: "nurse", x: 20, y: 20.2, w: 10, h: 4.2, label: "Staff Station" }),
     zone({ id: "M-PH", dept: "pharmacy", deptLabel: "Pharmacy", type: "Floor pharmacy", x: 54, y: 20.2, w: 10, h: 5, label: "Pharmacy" }),
@@ -353,12 +332,12 @@ function buildF4() {
     ...tile({
       x: 5.2, y: 3.8, cols: 12, rows: 1, w: 4.2, h: 6.4,
       prefix: "SUR", start: 401, dept: "surgward", deptLabel: "Surgical ward",
-      type: "Med/Surg — Single", team: "surg", statuses: MIX, head: "n",
+      type: "Med/Surg — Single", team: "surg", head: "n",
     }),
     ...tile({
       x: 5.2, y: 12.8, cols: 12, rows: 1, w: 4.2, h: 6.4,
       prefix: "SUR", start: 413, dept: "surgward", deptLabel: "Surgical ward",
-      type: "Med/Surg — Single", team: "surg", statuses: MIX.slice().reverse(), head: "s",
+      type: "Med/Surg — Single", team: "surg", head: "s",
     }),
     zone({ id: "PACU", dept: "pacu", deptLabel: "Recovery", type: "Post-anesthesia recovery", x: 54, y: 20.4, w: 16, h: 5, label: "PACU 80 m²" }),
     zone({ id: "S-NS", dept: "nurse", deptLabel: "Staff Station", type: "Nurse station", kind: "nurse", x: 20, y: 20.4, w: 12, h: 4.4, label: "Staff Station" }),
@@ -386,16 +365,16 @@ function buildF1() {
   const rooms = [
     bedRoom({
       id: "ED-T1", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 5.2, y: 3.8, w: 5.5, h: 4.6, status: "critical", team: "ed", surge: true,
+      x: 5.2, y: 3.8, w: 5.5, h: 4.6, team: "ed", surge: true,
     }),
     bedRoom({
       id: "ED-T2", dept: "ed", deptLabel: "Emergency / Trauma", type: "ED — Trauma",
-      x: 11, y: 3.8, w: 5.5, h: 4.6, status: "warning", team: "ed", surge: true, nurseIndex: 1,
+      x: 11, y: 3.8, w: 5.5, h: 4.6, team: "ed", surge: true, nurseIndex: 1,
     }),
     ...tile({
       x: 5.2, y: 9.2, cols: 6, rows: 2, w: 3.4, h: 3.6,
       prefix: "ED", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "ED — Exam", team: "ed", statuses: ED, surge: true,
+      type: "ED — Exam", team: "ed", surge: true,
     }),
     zone({ id: "F1-CT", dept: "imaging", deptLabel: "Radiology", type: "CT suite", x: 46, y: 3.8, w: 8, h: 5.2, label: "CT" }),
     zone({ id: "F1-XR", dept: "imaging", deptLabel: "Radiology", type: "X-ray", x: 54.5, y: 3.8, w: 8, h: 5.2, label: "X-ray" }),
@@ -407,12 +386,12 @@ function buildF1() {
     ...tile({
       x: 5.2, y: 36, cols: 5, rows: 2, w: 3.6, h: 4,
       prefix: "FAST", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "Fast track", team: "ed", statuses: MIX, surge: true,
+      type: "Fast track", team: "ed", surge: true,
     }),
     ...tile({
       x: 24.6, y: 36, cols: 4, rows: 2, w: 4.15, h: 4.1,
       prefix: "OBS", start: 1, dept: "ed", deptLabel: "Emergency / Trauma",
-      type: "Observation", team: "ed", statuses: MIX, surge: true,
+      type: "Observation", team: "ed", surge: true,
     }),
     zone({ id: "F1-RES", dept: "support", deptLabel: "Support", type: "Resuscitation support", x: 46, y: 36, w: 14, h: 8, label: "Resuscitation" }),
     zone({ id: "F1-LAB", dept: "support", deptLabel: "Support", type: "Stat lab", x: 62, y: 36, w: 10, h: 8, label: "Stat lab" }),
@@ -486,7 +465,6 @@ function buildB1() {
 }
 
 export function buildHospital() {
-  patientCursor = 0;
   return [buildF5(), buildF4(), buildF3(), buildF2(), buildF1(), buildB1()];
 }
 

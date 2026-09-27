@@ -1,11 +1,20 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Auth0Provider } from "@auth0/auth0-react";
-import { fetchAuthConfig } from "../api/client";
+import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
+import { fetchAuthConfig, setActor } from "../api/client";
 
 const AuthAvailability = createContext(false);
 
 export function useAuthAvailable() {
   return useContext(AuthAvailability);
+}
+
+// Keeps the API client's X-Actor header in step with the signed-in user.
+function ActorBridge() {
+  const { isAuthenticated, user } = useAuth0();
+  useEffect(() => {
+    setActor(isAuthenticated ? user?.name || user?.email : "");
+  }, [isAuthenticated, user]);
+  return null;
 }
 
 export default function AuthProvider({ children }) {
@@ -39,6 +48,7 @@ export default function AuthProvider({ children }) {
         }}
         cacheLocation="localstorage"
       >
+        <ActorBridge />
         {children}
       </Auth0Provider>
     </AuthAvailability.Provider>

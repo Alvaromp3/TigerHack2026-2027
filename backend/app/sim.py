@@ -5,7 +5,7 @@ import random
 import threading
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.catalog import DESTINATIONS, OCCUPIED, clinical_case, crew, fresh_patient_name
@@ -24,9 +24,11 @@ from app.models import (
 
 log = logging.getLogger(__name__)
 write_lock = threading.Lock()
+# Postgres advisory key: one census writer across every running instance.
+# A deploy runs the old and new server side by side, and both tick.
+CENSUS_LOCK = 742027
 TICK_SECONDS = 9
 SURGE_TICK_SECONDS = 2
-WAVE_SIZE = 4
 DIVERT_BATCH = 6
 OUTSIDE_HOSPITAL = "County General"
 DEMO_ROOM = "ED-06"
@@ -49,6 +51,8 @@ def tick(db: Session):
     # while holding the lock stalls every other writer.
     db.connection()
     with write_lock:
+        if not _serialize(db, wait=False):
+            return None
         state = db.get(HospitalState, 1)
         if state is not None:
             state.tick_count += 1
@@ -61,8 +65,94 @@ def tick(db: Session):
         summary = " · ".join(part for part in (cleaned, delivered, action) if part)
         if summary:
             log.info("census tick: %s", summary)
-        db.commit()
+        _commit(db)
         return action or cleaned
+
+
+def _serialize(db: Session, wait: bool = True) -> bool:
+    """Take the census write lock for this transaction. Commit or rollback releases it."""
+    if wait:
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": CENSUS_LOCK})
+    elif not db.scalar(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": CENSUS_LOCK}):
+        return False
+    # Rows read before the lock may be stale; read them again under it.
+    db.expire_all()
+    return True
+
+
+def _commit(db: Session):
+    fixed = reconcile_census(db)
+    if fixed:
+        log.warning("census reconciled: %s", "; ".join(fixed))
+    db.commit()
+
+
+def reconcile_census(db: Session) -> list[str]:
+    """Make every room agree with who is in it. Returns one note per room it fixed.
+
+    Occupied (critical, warning, normal) means a patient is in the room, and a bed
+    shows that patient's acuity. Available, cleaning and reserved mean nobody is.
+    A bed a patient left goes to cleaning, never straight to available.
+    Blocked rooms keep their status until the incident is resolved.
+    """
+    db.flush()
+    rooms = list(db.scalars(select(Room).order_by(Room.id)).all())
+    occupants = {patient.room_id: patient for patient in db.scalars(select(Patient)).all()}
+    fixed = []
+    queued = False
+    for room in rooms:
+        patient = occupants.get(room.id)
+        if room.status == "blocked":
+            continue
+        if patient is not None:
+            if room.kind == "or":
+                want = room.status if room.status in OCCUPIED else "warning"
+            else:
+                want = patient.acuity if patient.acuity in OCCUPIED else "normal"
+            if room.status != want:
+                fixed.append(f"{room.id} {room.status} -> {want}, {patient.name} is in it")
+                room.status = want
+            if room.hold_for or room.clean_type or room.ticks_left is not None or room.linen_stage:
+                room.hold_for = None
+                _clear_clean(room)
+            continue
+        if room.status in OCCUPIED:
+            fixed.append(f"{room.id} {room.status} -> cleaning, nobody is in it")
+            room.status = "cleaning"
+            _stamp_clean(db, room, "")
+            queued = True
+        elif room.status == "cleaning":
+            if room.ticks_left is None:
+                _stamp_clean(db, room, "")
+                queued = True
+            elif room.linen_stage is None:
+                _start_linen(db, room)
+                queued = True
+        elif room.status in ("available", "reserved"):
+            stale_hold = room.status == "available" and room.hold_for
+            if stale_hold or room.clean_type or room.ticks_left is not None or room.linen_stage:
+                fixed.append(f"{room.id} {room.status} had leftover turnover data")
+                _clear_clean(room)
+                if stale_hold:
+                    room.hold_for = None
+    cleaning = {room.id: room for room in rooms if room.status == "cleaning"}
+    for keeper in db.scalars(select(Housekeeper)).all():
+        if keeper.room_id and keeper.room_id not in cleaning:
+            keeper.room_id = None
+            queued = True
+    for aide in db.scalars(select(LinenAide)).all():
+        room = cleaning.get(aide.room_id) if aide.room_id else None
+        if aide.room_id and (room is None or room.linen_stage not in LINEN_ACTIVE):
+            aide.room_id = None
+            queued = True
+    state = db.get(HospitalState, 1)
+    if state is not None and state.demo_room_id and state.demo_room_id not in cleaning:
+        state.demo_room_id = None
+        queued = True
+    if queued:
+        _assign_housekeepers(db)
+        _assign_linen(db)
+    return fixed
 
 
 def tick_seconds(db: Session) -> int:
@@ -72,33 +162,12 @@ def tick_seconds(db: Session) -> int:
     return TICK_SECONDS
 
 
-def declare_incoming(db: Session, notice: str) -> int:
-    text = (notice or "").strip()
-    if not text:
-        raise ValueError("Write what is coming in.")
+def call_physicians(db: Session) -> int:
     with write_lock:
+        _serialize(db)
         state = db.get(HospitalState, 1)
         if state is None:
             raise ValueError("The hospital census is not ready.")
-        if state.surge:
-            raise ValueError("An incoming notice is already active.")
-        state.surge = True
-        state.incoming_notice = text[:240]
-        landed = 0
-        for _ in range(WAVE_SIZE):
-            if not _admit_critical(db):
-                break
-            landed += 1
-        _log(db, "Command", f"Incoming: {state.incoming_notice}", None, "admit")
-        db.commit()
-        return landed
-
-
-def call_physicians(db: Session) -> int:
-    with write_lock:
-        state = db.get(HospitalState, 1)
-        if state is None or not state.surge:
-            raise ValueError("Call physicians after an incoming notice.")
         if state.called_physicians:
             return state.called_physicians
         brought = 0
@@ -121,15 +190,16 @@ def call_physicians(db: Session) -> int:
                 brought += 1
         state.called_physicians = brought or len(CALLBACKS)
         _log(db, "Command", f"Called in {state.called_physicians} physicians.", None, "move")
-        db.commit()
+        _commit(db)
         return state.called_physicians
 
 
 def divert_overflow(db: Session) -> int:
     with write_lock:
+        _serialize(db)
         state = db.get(HospitalState, 1)
-        if state is None or not state.surge:
-            raise ValueError("Divert after an incoming notice.")
+        if state is None:
+            raise ValueError("The hospital census is not ready.")
         people = _ed_patients(db)
         random.shuffle(people)
         sent = 0
@@ -145,12 +215,13 @@ def divert_overflow(db: Session) -> int:
                 None,
                 "divert",
             )
-        db.commit()
+        _commit(db)
         return sent
 
 
 def reset_demo(db: Session) -> str:
     with write_lock:
+        _serialize(db)
         state = db.get(HospitalState, 1)
         if state is None:
             raise ValueError("The hospital census is not ready.")
@@ -188,7 +259,7 @@ def reset_demo(db: Session) -> str:
             room.id,
             "move",
         )
-        db.commit()
+        _commit(db)
         return room.id
 
 
@@ -465,7 +536,7 @@ def _ed_patients(db: Session):
     people = []
     for person in db.scalars(select(Patient).join(Room)).unique().all():
         room = person.room
-        if room is None or room.kind != "bed" or room.dept != "ed":
+        if room is None or room.kind != "bed" or room.dept != "ed" or room.status == "blocked":
             continue
         people.append(person)
     return people
@@ -519,19 +590,15 @@ def _send_outside(db: Session, patient: Patient):
         return False
     name = patient.name
     room_id = room.id
+    clinical = _clinical_text(patient)
     db.add(Transfer(
         patient_name=name,
         destination=OUTSIDE_HOSPITAL,
         reason="incoming",
     ))
     db.delete(patient)
-    room.status = "available"
     room.hold_for = None
-    _clear_clean(room)
-    for keeper in db.scalars(select(Housekeeper).where(Housekeeper.room_id == room.id)).all():
-        keeper.room_id = None
-    for aide in db.scalars(select(LinenAide).where(LinenAide.room_id == room.id)).all():
-        aide.room_id = None
+    _vacate(db, room, clinical)
     _log(db, name, f"{name} diverted from {room_id} to {OUTSIDE_HOSPITAL}", room_id, "divert")
     return True
 
@@ -657,32 +724,17 @@ def _die(db: Session, patient: Patient):
     return f"death {name}"
 
 
-def ensure_cleaning_queue(db: Session):
-    """Queue beds already in cleaning, and put free housekeepers on the front."""
-    db.flush()
-    keepers = list(db.scalars(select(Housekeeper).order_by(Housekeeper.id)).all())
-    for keeper in keepers:
-        if not keeper.room_id:
-            continue
-        room = db.get(Room, keeper.room_id)
-        if room is None or room.status != "cleaning":
-            keeper.room_id = None
-    pending = list(db.scalars(
-        select(Room).where(Room.status == "cleaning", Room.ticks_left.is_(None))
-    ).all())
-    for room in pending:
-        _stamp_clean(db, room, "")
-    for room in db.scalars(select(Room).where(Room.status == "cleaning", Room.linen_stage.is_(None))).all():
-        _start_linen(db, room)
-    aides = list(db.scalars(select(LinenAide).order_by(LinenAide.id)).all())
-    for aide in aides:
-        if not aide.room_id:
-            continue
-        room = db.get(Room, aide.room_id)
-        if room is None or room.status != "cleaning" or room.linen_stage not in LINEN_ACTIVE:
-            aide.room_id = None
-    _assign_housekeepers(db)
-    _assign_linen(db)
+def repair_census(db: Session) -> list[str]:
+    """Startup pass: fix whatever an older build or an interrupted tick left behind."""
+    with write_lock:
+        _serialize(db)
+        fixed = reconcile_census(db)
+        _assign_housekeepers(db)
+        _assign_linen(db)
+        db.commit()
+    if fixed:
+        log.warning("census repaired at startup: %s", "; ".join(fixed))
+    return fixed
 
 
 def _advance_cleaning(db: Session):
@@ -985,6 +1037,7 @@ def reserve_room(db: Session, room_id: str, hold_for: str) -> str | None:
     if not name:
         return "Say who the bed is held for."
     with write_lock:
+        _serialize(db)
         room = db.get(Room, room_id)
         if room is None:
             return "That room is not on the census."
@@ -993,12 +1046,13 @@ def reserve_room(db: Session, room_id: str, hold_for: str) -> str | None:
         room.status = "reserved"
         room.hold_for = name[:80]
         _log(db, name[:80], f"{room.id} reserved for {name[:80]}", room.id, "move")
-        db.commit()
+        _commit(db)
     return None
 
 
 def release_room(db: Session, room_id: str) -> str | None:
     with write_lock:
+        _serialize(db)
         room = db.get(Room, room_id)
         if room is None:
             return "That room is not on the census."
@@ -1008,12 +1062,13 @@ def release_room(db: Session, room_id: str) -> str | None:
         room.status = "available"
         room.hold_for = None
         _log(db, who, f"{room.id} hold released", room.id, "move")
-        db.commit()
+        _commit(db)
     return None
 
 
 def assign_housekeeper(db: Session, room_id: str, keeper_id: int) -> str | None:
     with write_lock:
+        _serialize(db)
         room = db.get(Room, room_id)
         keeper = db.get(Housekeeper, keeper_id)
         if room is None or keeper is None:
@@ -1030,12 +1085,33 @@ def assign_housekeeper(db: Session, room_id: str, keeper_id: int) -> str | None:
         if state is not None and state.demo_room_id == room.id:
             state.demo_room_id = None
         _log(db, keeper.name, f"{keeper.name} assigned to {room.id}", room.id, "clean")
-        db.commit()
+        _commit(db)
+    return None
+
+
+def discharge_room(db: Session, room_id: str) -> str | None:
+    """Discharge the patient in one bed on command. The bed goes into turnover."""
+    with write_lock:
+        _serialize(db)
+        room = db.get(Room, room_id)
+        if room is None:
+            return "That room was not found."
+        patient = room.patient
+        if patient is None:
+            return "Nobody is in that bed."
+        if room.kind == "or":
+            return "Patients leave the OR through recovery, not discharge."
+        if patient.acuity == "critical":
+            return f"{patient.name} is critical and cannot be discharged."
+        if _discharge_patient(db, patient) is None:
+            return "That patient is already moving. Try again."
+        _commit(db)
     return None
 
 
 def complete_clean(db: Session, room_id: str) -> tuple[str | None, bool]:
     with write_lock:
+        _serialize(db)
         room = db.get(Room, room_id)
         if room is None:
             return "That room is not on the census.", False
@@ -1053,7 +1129,7 @@ def complete_clean(db: Session, room_id: str) -> tuple[str | None, bool]:
                 keeper_name = aide.name
             aide.room_id = None
         opened = _try_open(db, room, keeper_name)
-        db.commit()
+        _commit(db)
         if opened:
             return None, True
         return "Linen is still out. The bed stays closed until clean linen is here.", False
@@ -1066,6 +1142,7 @@ def open_incident(db: Session, room_id: str, title: str, severity: str) -> tuple
     if severity not in {"low", "medium", "high", "critical"}:
         return "Severity is not recognized.", None
     with write_lock:
+        _serialize(db)
         room = db.get(Room, room_id)
         if room is None:
             return "That room is not on the census.", None
@@ -1086,13 +1163,14 @@ def open_incident(db: Session, room_id: str, title: str, severity: str) -> tuple
         room.status = "blocked"
         db.flush()
         _log(db, "Command", f"{room.id} blocked — {label[:120]}", room.id, "move")
-        db.commit()
+        _commit(db)
         incident_id = incident.id
     return None, incident_id
 
 
 def resolve_incident(db: Session, incident_id: int) -> str | None:
     with write_lock:
+        _serialize(db)
         incident = db.get(Incident, incident_id)
         if incident is None:
             return "Incident was not found."
@@ -1100,15 +1178,18 @@ def resolve_incident(db: Session, incident_id: int) -> str | None:
             return "That incident is already closed."
         room = db.get(Room, incident.room_id)
         if room is not None and room.status == "blocked":
+            # The baseline is a starting point; who is in the bed now decides the status.
             room.status = incident.baseline_status or "available"
+            reconcile_census(db)
         incident.status = "resolved"
         incident.resolved_at = datetime.now(timezone.utc)
+        restored = room.status if room is not None else incident.baseline_status
         _log(
             db,
             "Command",
-            f"{incident.room_id} incident closed — restored {incident.baseline_status}",
+            f"{incident.room_id} incident closed — restored {restored}",
             incident.room_id,
             "move",
         )
-        db.commit()
+        _commit(db)
     return None
