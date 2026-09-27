@@ -5,7 +5,6 @@ export const TABS = [
   { id: "live", label: "Live Map", icon: "map" },
   { id: "ambulances", label: "Ambulances", icon: "ambulance" },
   { id: "network", label: "Network", icon: "network" },
-  { id: "ops", label: "Operations", icon: "tiles" },
   { id: "data", label: "Open Data", icon: "layers" },
 ];
 

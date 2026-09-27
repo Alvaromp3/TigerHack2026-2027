@@ -56,11 +56,42 @@ def fresh_patient_name(taken: set[str], index: int = 0) -> str:
             return candidate
     raise RuntimeError("patient name pool exhausted")
 
+# Several attendings and nurses per unit so a demo census stays near a safe load
+# (about 4 patients per nurse, 4–5 per attending) instead of one person covering a whole floor.
 CREWS = {
-    "icu": ("Dr. Leena Patel", ["RN Maya Chen", "RN Chris Novak"]),
-    "ed": ("Dr. Jonah Okonkwo", ["RN Elena Brooks", "RN Jonah Blake"]),
-    "med": ("Dr. Amir Shah", ["RN Luis Ibarra", "RN Priya Raman"]),
-    "surg": ("Dr. Camila Alvarez", ["RN Priya Raman", "RN Luis Ibarra"]),
+    "icu": (
+        ["Dr. Leena Patel", "Dr. Omar Desta"],
+        ["RN Maya Chen", "RN Chris Novak", "RN Imani Diaz"],
+    ),
+    "ed": (
+        [
+            "Dr. Jonah Okonkwo",
+            "Dr. Amina Diallo",
+            "Dr. Keisha Ward",
+            "Dr. Luis Ortega",
+            "Dr. Hannah Berg",
+            "Dr. Samuel Cho",
+            "Dr. Fatima Okeke",
+        ],
+        [
+            "RN Elena Brooks",
+            "RN Jonah Blake",
+            "RN Sofia Lang",
+            "RN Owen Clarke",
+            "RN Ruth Ferreira",
+            "RN Malik Santos",
+            "RN Chloe Reddy",
+            "RN Yara Nguyen",
+        ],
+    ),
+    "med": (
+        ["Dr. Amir Shah", "Dr. Elena Voss", "Dr. Andre Nair", "Dr. Mei Ortiz", "Dr. Daniel Ibrahim"],
+        ["RN Luis Ibarra", "RN Priya Raman", "RN Felix Haddad", "RN Ines Keller", "RN Ravi Petrov", "RN Amara Cohen"],
+    ),
+    "surg": (
+        ["Dr. Camila Alvarez", "Dr. Paul Kim", "Dr. Nora Abebe", "Dr. Victor Santos"],
+        ["RN Grace Walsh", "RN Diego Tanaka", "RN Leah Moreau", "RN Hassan Cole"],
+    ),
 }
 
 DESTINATIONS = {
@@ -119,8 +150,18 @@ def clinical_case(name: str, acuity: str, index: int = 0):
 
 
 def crew(team, nurse_index=0):
-    physician, nurses = CREWS[team]
-    return physician, nurses[nurse_index % len(nurses)]
+    physicians, nurses = CREWS[team]
+    return physicians[nurse_index % len(physicians)], nurses[nurse_index % len(nurses)]
+
+
+def balanced_crew(team, physician_counts, nurse_counts):
+    """On-duty pair with the smallest current panels."""
+    physicians, nurses = CREWS[team]
+
+    def lightest(names, counts):
+        return min(names, key=lambda name: (counts.get(name, 0), names.index(name)))
+
+    return lightest(physicians, physician_counts), lightest(nurses, nurse_counts)
 
 
 def _tile(prefix, start, cols, rows, dept, floor_id, statuses, team, surge=False):
@@ -186,8 +227,8 @@ def census_rooms():
         if spec["status"] not in OCCUPIED:
             continue
         spec["patient"] = PATIENTS[cursor]
+        spec["physician"], spec["nurse"] = crew(spec["team"], cursor)
         cursor += 1
-        spec["physician"], spec["nurse"] = crew(spec["team"], spec["nurse_index"])
         case = clinical_case(spec["patient"], spec["status"], cursor)
         spec["age"] = case["age"]
         spec["chief_complaint"] = case["chief_complaint"]

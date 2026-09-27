@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.catalog import DESTINATIONS, OCCUPIED, clinical_case, crew, fresh_patient_name
+from app.catalog import CREWS, DESTINATIONS, OCCUPIED, balanced_crew, clinical_case, fresh_patient_name
 from app.models import (
     Death,
     FlowEvent,
@@ -49,6 +49,14 @@ ISOLATION_MARKERS = ("sepsis", "c. diff", "c.diff", "covid", "mrsa", "tb", "tube
 ED_BED_FLOOR = 4
 # One ICU bed stays open so the unit can be tight without sitting at zero.
 ICU_BED_FLOOR = 1
+# Occupied share the board steers toward. A clean still finishes in one tick, so a
+# bed does not stay "in use" just because turnover is slow. Below the low end the
+# census fills one bed; above the high end it sends one patient on. The middle is
+# the resting point, not an empty house and not a full one.
+ED_LOW = 0.55
+ICU_LOW, ICU_HIGH = 0.45, 0.72
+INPATIENT_LOW, INPATIENT_HIGH = 0.48, 0.68
+OR_LOW = 0.50
 AMBULANCE_ZONES = (("F1", "ED"), ("F1", "FAST"), ("F3", "ER"))
 
 
@@ -361,8 +369,11 @@ def _icu_opening(db: Session) -> int:
 
 
 def _hold_capacity(db: Session) -> str | None:
-    """One correction per tick when the live census is below the ambulance floor."""
+    """Keep a surge bed free, then one step back toward the middle of each unit."""
     notes = [note for note in (_open_emergency_bed(db), _open_icu_bed(db)) if note]
+    steered = _steer_midpoint(db)
+    if steered:
+        notes.append(steered)
     return " · ".join(notes) or None
 
 
@@ -396,6 +407,121 @@ def _open_icu_bed(db: Session) -> str | None:
         f"{person.name} moved to medicine {beds[0].id}",
         settle="normal",
     )
+
+
+def _unit_share(db: Session, unit: str) -> float:
+    """Same rule as the capacity board: a bed is in use unless it is available."""
+    rooms = list(db.scalars(select(Room).where(Room.kind.in_(("bed", "or")))).all())
+    if unit == "ed":
+        rooms = [room for room in rooms if room.dept == "ed"]
+    elif unit == "icu":
+        rooms = [room for room in rooms if room.dept == "icu"]
+    elif unit == "inpatient":
+        rooms = [room for room in rooms if room.dept in ("med", "surgward")]
+    elif unit == "or":
+        rooms = [room for room in rooms if room.kind == "or"]
+    else:
+        return 0.0
+    if not rooms:
+        return 0.0
+    used = sum(1 for room in rooms if room.status != "available")
+    return used / len(rooms)
+
+
+def _inpatient_beds(db: Session):
+    return _med_beds(db) + _beds(db, floor_id="F4", dept="surgward")
+
+
+def _steer_midpoint(db: Session) -> str | None:
+    """One move that pulls a drained unit up, or eases a unit that ran past the band."""
+    actions = []
+    if _unit_share(db, "inpatient") > INPATIENT_HIGH:
+        actions.append(_discharge_one)
+    if _unit_share(db, "icu") > ICU_HIGH:
+        actions.append(_stepdown_one)
+    if not actions:
+        if _unit_share(db, "inpatient") < INPATIENT_LOW:
+            actions.append(_fill_inpatient)
+        if _unit_share(db, "icu") < ICU_LOW:
+            actions.append(_fill_icu)
+        if _unit_share(db, "or") < OR_LOW:
+            actions.append(_fill_or)
+        if _unit_share(db, "ed") < ED_LOW:
+            actions.append(_admit_one)
+    random.shuffle(actions)
+    for step in actions:
+        result = step(db)
+        if result:
+            return result
+    return None
+
+
+def _fill_inpatient(db: Session):
+    beds = _inpatient_beds(db)
+    if not beds:
+        return None
+    if _unit_share(db, "ed") >= ED_LOW:
+        people = [
+            person for person in _people(db, floor_id="F1", stable=True, min_stay=2)
+            if person.room and person.room.id.startswith(("ED", "FAST"))
+        ]
+        med = _med_beds(db)
+        if people and med:
+            moved = _shift(db, people=people, beds=med, label="medicine")
+            if moved:
+                return moved
+    bed = random.choice(beds)
+    needs_or = bed.dept == "med" and random.random() < 0.3
+    return _receive(db, bed, "normal", needs_or=needs_or)
+
+
+def _fill_icu(db: Session):
+    beds = _beds(db, floor_id="F3", dept="icu")
+    if not beds:
+        return None
+    if _unit_share(db, "ed") >= ED_LOW:
+        people = [
+            person for person in _people(db, acuity="critical", min_stay=2)
+            if person.room and person.room.dept == "ed"
+        ]
+        if people:
+            moved = _shift(db, people=people, beds=beds, label="ICU")
+            if moved:
+                return moved
+    return _receive(db, random.choice(beds), "critical")
+
+
+def _fill_or(db: Session):
+    """One theatre in use is the middle. Both empty is the low end."""
+    beds = _beds(db, kind="or")
+    if not beds:
+        return None
+    waiting = [
+        person for person in _people(db, needs_or=True, min_stay=2)
+        if person.room and person.room.kind == "bed"
+    ]
+    if not waiting:
+        floor = [
+            person for person in _people(db, acuity="normal", needs_or=False, min_stay=2)
+            if person.room and person.room.dept in ("med", "surgward")
+        ]
+        if not floor:
+            return None
+        person = random.choice(floor)
+        person.needs_or = True
+        waiting = [person]
+    return _shift(db, people=waiting, beds=beds, label="OR")
+
+
+def _stepdown_one(db: Session):
+    people = [
+        person for person in _people(db, floor_id="F3", dept="icu", min_stay=STAY_ICU)
+        if person.acuity in ("normal", "warning")
+    ]
+    beds = _med_beds(db)
+    if not people or not beds:
+        return None
+    return _shift(db, people=people, beds=beds, label="medicine")
 
 
 def _admit_sites(db: Session):
@@ -438,13 +564,15 @@ def _boarding_stable(db: Session):
 
 def _transfer_moves(db: Session):
     moves = []
-    if len(_beds(db, floor_id="F3", dept="icu")) > ICU_BED_FLOOR:
+    icu_share = _unit_share(db, "icu")
+    if icu_share < ICU_HIGH and len(_beds(db, floor_id="F3", dept="icu")) > ICU_BED_FLOOR:
         moves.extend(("icu", person) for person in _boarding_critical(db))
-    if _med_beds(db):
+    if _med_beds(db) and _unit_share(db, "inpatient") < INPATIENT_HIGH:
         moves.extend(("floor", person) for person in _boarding_stable(db))
-        for person in _people(db, floor_id="F3", dept="icu", min_stay=STAY_ICU):
-            if person.acuity in ("normal", "warning"):
-                moves.append(("stepdown", person))
+        if icu_share >= ICU_LOW:
+            for person in _people(db, floor_id="F3", dept="icu", min_stay=STAY_ICU):
+                if person.acuity in ("normal", "warning"):
+                    moves.append(("stepdown", person))
     return moves
 
 
@@ -510,6 +638,8 @@ def _discharge_people(db: Session):
     people.extend(_people(db, floor_id="F3", dept="med", prefix="MS", acuity="normal", needs_or=False, min_stay=STAY_RECOVER))
     people.extend(_people(db, floor_id="F4", dept="surgward", acuity="normal", needs_or=False, min_stay=STAY_RECOVER))
     people.extend(_people(db, floor_id="F1", prefix="OBS", acuity="normal", needs_or=False, min_stay=STAY_OBS))
+    if _unit_share(db, "inpatient") < INPATIENT_LOW:
+        people = [person for person in people if person.room and person.room.dept not in ("med", "surgward")]
     return people
 
 
@@ -538,6 +668,8 @@ def _divert_one(db: Session):
 
 
 def _death_people(db: Session):
+    if _unit_share(db, "icu") < ICU_LOW:
+        return []
     return _people(db, floor_id="F3", dept="icu", acuity="critical", min_stay=STAY_ICU)
 
 
@@ -626,21 +758,22 @@ def _admit(db: Session, floor_id: str, prefix: str):
     return _receive(db, random.choice(beds), acuity)
 
 
-def _receive(db: Session, bed: Room, acuity: str):
+def _receive(db: Session, bed: Room, acuity: str, needs_or: bool | None = None):
     state = db.get(HospitalState, 1)
     if state is None:
         return None
     state.admit_index += 1
     taken = set(db.scalars(select(Patient.name)).all())
     name = fresh_patient_name(taken, random.randrange(10_000))
-    team = "icu" if bed.dept == "icu" else "ed"
-    physician, nurse = crew(team, random.randrange(2))
+    physician, nurse = next_crew(db, _team_for(bed))
     case = clinical_case(name, acuity, state.admit_index)
+    if needs_or is None:
+        needs_or = acuity == "critical" and random.random() < 0.35
     patient = Patient(
         name=name,
         acuity=acuity,
         room_id=bed.id,
-        needs_or=acuity == "critical" and random.random() < 0.35,
+        needs_or=needs_or,
         physician=physician,
         nurse=nurse,
         age=case["age"],
@@ -816,6 +949,9 @@ def repair_census(db: Session) -> list[str]:
             log.warning("census repair skipped; another process holds the census lock")
             return []
         fixed = reconcile_census(db)
+        moved = balance_assignments(db)
+        if moved:
+            fixed.append(f"spread {moved} patients across the on-duty crews")
         _assign_housekeepers(db)
         _assign_linen(db)
         db.commit()
@@ -1071,7 +1207,7 @@ def _move(db: Session, patient: Patient, dest: Room, message: str, expect_kind: 
     patient.room = dest
     patient.stay_ticks = 0
     team = _team_for(dest)
-    patient.physician, patient.nurse = crew(team, random.randrange(2))
+    patient.physician, patient.nurse = next_crew(db, team)
     if dest.kind == "or":
         dest.status = "warning"
     else:
@@ -1110,6 +1246,40 @@ def _team_for(room: Room):
     if room.kind == "or" or room.dept == "surgward":
         return "surg"
     return "med"
+
+
+def next_crew(db: Session, team: str):
+    """Attending and nurse on this unit who currently have the smallest panels."""
+    physicians = {name: 0 for name in CREWS[team][0]}
+    nurses = {name: 0 for name in CREWS[team][1]}
+    for physician, nurse in db.execute(select(Patient.physician, Patient.nurse)).all():
+        if physician in physicians:
+            physicians[physician] += 1
+        if nurse in nurses:
+            nurses[nurse] += 1
+    return balanced_crew(team, physicians, nurses)
+
+
+def balance_assignments(db: Session) -> int:
+    """Give each occupied bed the next on-duty attending and nurse for its unit."""
+    grouped = {team: [] for team in CREWS}
+    patients = db.scalars(select(Patient).join(Room).order_by(Room.dept, Room.id)).unique().all()
+    for patient in patients:
+        if patient.room is None:
+            continue
+        grouped[_team_for(patient.room)].append(patient)
+    changed = 0
+    for team, people in grouped.items():
+        physicians, nurses = CREWS[team]
+        for index, patient in enumerate(people):
+            physician = physicians[index % len(physicians)]
+            nurse = nurses[index % len(nurses)]
+            if patient.physician == physician and patient.nurse == nurse:
+                continue
+            patient.physician = physician
+            patient.nurse = nurse
+            changed += 1
+    return changed
 
 
 def _log(db: Session, name: str, message: str, room_id: str | None, kind: str):
