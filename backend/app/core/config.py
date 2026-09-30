@@ -6,8 +6,6 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Health Hackathon API"
-    debug: bool = True
     # NoDecode keeps a plain URL from the environment. Pydantic otherwise
     # tries to JSON-parse list fields and crashes on values like http://localhost:5173.
     cors_origins: Annotated[list[str], NoDecode] = [
@@ -17,7 +15,6 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"https://[a-z0-9-]+\.vercel\.app"
     auth0_domain: str = ""
     auth0_client_id: str = ""
-    auth0_client_secret: str = ""
     database_url: str = "postgresql+psycopg://tigerhack:tigerhack@localhost:5433/tigerhack"
     openrouter_api_key: str = ""
     openrouter_model: str = "google/gemini-2.5-flash"

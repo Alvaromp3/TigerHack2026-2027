@@ -15,10 +15,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.14"
-      - key: APP_NAME
-        value: Health Hackathon API
-      - key: DEBUG
-        value: "false"
       - key: CORS_ORIGINS
         value: http://localhost:5173
       # Paste the Internal Database URL from tigerhack-db, and change the
@@ -30,8 +26,6 @@ services:
       - key: AUTH0_DOMAIN
         sync: false
       - key: AUTH0_CLIENT_ID
-        sync: false
-      - key: AUTH0_CLIENT_SECRET
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false

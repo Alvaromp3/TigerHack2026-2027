@@ -843,34 +843,10 @@ def _shift(db: Session, people, beds, label: str):
     return _move(db, patient, dest, message, expect_kind=expect_kind)
 
 
-def _leave_or(db: Session):
-    people = _people(db, kind="or", min_stay=STAY_IN_OR)
-    beds = _beds(db, floor_id="F4", dept="surgward")
-    if not people or not beds:
-        return None
-    patient = random.choice(people)
-    dest = random.choice(beds)
-    return _move(
-        db,
-        patient,
-        dest,
-        f"{patient.name} left the OR for {dest.id}",
-        expect_kind="or",
-        settle="normal",
-    )
 
 
-def _discharge_pool(db: Session, floor_id: str, dept=None, prefix=None):
-    if prefix == "OBS":
-        return _people(db, floor_id=floor_id, prefix=prefix, stable=True, needs_or=False)
-    return _people(db, floor_id=floor_id, dept=dept, acuity="normal", needs_or=False)
 
 
-def _discharge(db: Session, floor_id: str, dept=None, prefix=None):
-    people = _discharge_pool(db, floor_id, dept, prefix)
-    if not people:
-        return None
-    return _discharge_patient(db, random.choice(people))
 
 
 def _claim(db: Session, patient: Patient) -> Patient | None:
@@ -898,22 +874,8 @@ def _discharge_patient(db: Session, patient: Patient):
     return f"discharge {name}"
 
 
-def _divert(db: Session, floor_id: str, acuity: str, open_floor: str, open_dept: str, reason: str):
-    if _beds(db, floor_id=open_floor, dept=open_dept):
-        return None
-    people = _people(db, floor_id=floor_id, acuity=acuity)
-    if not people:
-        return None
-    return _transfer(db, random.choice(people), reason)
 
 
-def _divert_or(db: Session):
-    if _beds(db, kind="or"):
-        return None
-    people = _people(db, floor_id="F2", needs_or=True)
-    if not people:
-        return None
-    return _transfer(db, random.choice(people), "or_full")
 
 
 def _die(db: Session, patient: Patient):
